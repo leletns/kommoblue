@@ -92,12 +92,11 @@ async function getValidToken() {
 function getAuthorizationUrl() {
   const params = new URLSearchParams({
     client_id: config.kommo.clientId,
-    mode: 'popup',
     redirect_uri: config.kommo.redirectUri,
     response_type: 'code',
     state: 'kommoblue_auth',
   });
-  // URL base usa o subdomínio da conta
+  // Sem mode = redirect padrão (server-side OAuth)
   const base = config.kommo.subdomain
     ? `https://${config.kommo.subdomain}.kommo.com/oauth`
     : 'https://www.kommo.com/oauth';
