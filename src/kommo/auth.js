@@ -77,6 +77,7 @@ async function refreshAccessToken() {
 
 /**
  * Retorna um access token válido, renovando se necessário.
+ * Token de longa duração (expires_at > ano 2100) nunca é renovado.
  */
 async function getValidToken() {
   let tokens = tokenStore.getTokens();
@@ -85,7 +86,9 @@ async function getValidToken() {
     throw new Error('Kommo não autenticado. Acesse /auth/kommo para autenticar.');
   }
 
-  if (tokenStore.isExpired(tokens)) {
+  // Token de longa duração: expires_at muito alto = não renova nunca
+  const isLongDurationToken = tokens.expires_at > 4_000_000_000; // > ano 2096
+  if (!isLongDurationToken && tokenStore.isExpired(tokens)) {
     tokens = await refreshAccessToken();
   }
 
