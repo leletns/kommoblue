@@ -131,8 +131,20 @@ Access token expira em: ${new Date(tokens.expires_at * 1000).toLocaleString('pt-
       </body></html>
     `);
   } catch (err) {
-    logger.error('Falha na troca do código OAuth:', err.message);
-    res.status(500).send(`Erro ao autenticar: ${err.message}`);
+    const detail = err.response?.data || err.message;
+    logger.error('Falha na troca do código OAuth:', JSON.stringify(detail));
+    res.status(500).send(`
+      <h2>Erro ao autenticar</h2>
+      <p><b>Erro:</b> ${err.message}</p>
+      <h3>Resposta do Kommo:</h3>
+      <pre style="background:#fee;padding:10px">${JSON.stringify(detail, null, 2)}</pre>
+      <h3>Config enviada:</h3>
+      <pre style="background:#f0f0f0;padding:10px">${JSON.stringify({
+        client_id: config.kommo.clientId?.slice(0,8)+'...',
+        redirect_uri: config.kommo.redirectUri,
+        grant_type: 'authorization_code',
+      }, null, 2)}</pre>
+    `);
   }
 });
 
