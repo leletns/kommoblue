@@ -10,7 +10,11 @@ const config = require('../config');
 const tokenStore = require('../utils/token-store');
 const logger = require('../utils/logger');
 
-const AUTH_URL = 'https://www.kommo.com/oauth2/access_token';
+// Token exchange usa o subdomínio da conta (ex: comercialblueclinica.kommo.com)
+// Autorização usa www.kommo.com — troca de token usa SUBDOMAIN.kommo.com
+function getTokenUrl() {
+  return `https://${config.kommo.subdomain}.kommo.com/oauth2/access_token`;
+}
 
 /**
  * Troca o authorization code por access + refresh token.
@@ -19,7 +23,7 @@ const AUTH_URL = 'https://www.kommo.com/oauth2/access_token';
 async function exchangeCode(code) {
   logger.info('Trocando authorization code por tokens...');
 
-  const response = await axios.post(AUTH_URL, {
+  const response = await axios.post(getTokenUrl(), {
     client_id: config.kommo.clientId,
     client_secret: config.kommo.clientSecret,
     grant_type: 'authorization_code',
@@ -47,7 +51,7 @@ async function refreshAccessToken() {
   logger.info('Renovando access token do Kommo...');
 
   try {
-    const response = await axios.post(AUTH_URL, {
+    const response = await axios.post(getTokenUrl(), {
       client_id: config.kommo.clientId,
       client_secret: config.kommo.clientSecret,
       grant_type: 'refresh_token',
