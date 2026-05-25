@@ -35,7 +35,7 @@ module.exports = {
 
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY || '',
-    model: process.env.AI_MODEL || 'claude-opus-4-7',
+    model: process.env.AI_MODEL || 'claude-haiku-4-5-20251001',
   },
 
   agent: {
