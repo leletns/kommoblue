@@ -359,6 +359,24 @@ async function applyBulkDecision(leadId, decision, summary) {
     actions.push({ type: 'tags_added', tags });
   } catch (_) {}
 
+  // Task creation
+  if (decision.task_to_create && decision.temperature !== 'frio' && decision.temperature !== 'desqualificado') {
+    try {
+      const taskTypeMap = { call: 1, meeting: 2, email: 3, followup: 1 };
+      const dueDays = decision.task_to_create.due_days || 1;
+      const dueTimestamp = Math.floor(Date.now() / 1000) + (dueDays * 86400);
+
+      await kommo.createTask(leadId, {
+        text: decision.task_to_create.text,
+        completeTillTimestamp: dueTimestamp,
+        taskTypeId: taskTypeMap[decision.task_to_create.type] || 1,
+      });
+      actions.push({ type: 'task_created', text: decision.task_to_create.text });
+    } catch (err) {
+      logger.error(`[BulkScan] Falha ao criar tarefa lead ${leadId}:`, err.message);
+    }
+  }
+
   return actions;
 }
 

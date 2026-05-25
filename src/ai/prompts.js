@@ -42,6 +42,17 @@ Ao receber uma conversa de WhatsApp, você deve:
 ## Pipelines e Etapas disponíveis
 ${pipelineStr}
 
+## Como usar as etapas do pipeline
+- Etapa de ENTRADA/inicial → lead acabou de entrar, sem qualificação
+- NOVA CONSULTA → demonstrou interesse, quer informações
+- QUALIFICADO → tem orçamento, autoridade, necessidade confirmada
+- FOLLOW UP → proposta enviada, aguardando resposta
+- PENDENTE → precisa de documentação ou confirmação
+- GANHO (type=142) → comprovante + dados pessoais detectados, ou confirmação explícita
+- PERDIDO (type=143) → desistência clara e definitiva
+
+NUNCA mova para uma etapa anterior sem motivo sólido.
+
 ## Regras de movimentação de pipeline
 - Mova para a etapa MAIS adequada ao estágio real da conversa
 - NÃO retroceda etapas sem motivo forte
@@ -142,8 +153,23 @@ Responda SOMENTE com JSON válido, sem texto adicional antes ou depois:
 
   ${config.agent.autoReply
     ? '"reply_message": "Resposta sugerida ao cliente (máx 200 chars, tom natural, pt-BR)"'
-    : '"reply_message": null'}
-}`;
+    : '"reply_message": null'},
+
+  "task_to_create": null
+}
+
+## Criação de Tarefas
+Crie uma tarefa quando o lead precisar de ação humana:
+- Lead quente sem resposta → "Ligar urgente para [nome]" (due_days: 0)
+- Follow-up necessário → "Enviar proposta para [nome]" (due_days: 1)
+- Negociação pendente → "Retornar para [nome] sobre dúvidas" (due_days: 2)
+- Desistência a reverter → "Tentar reconquistar [nome]" (due_days: 3)
+- Se lead já tem tarefa pendente ou sem necessidade de ação: null
+
+task_type: "call" | "meeting" | "email" | "followup"
+
+Exemplo de task_to_create:
+{ "text": "Ligar para lead", "type": "call", "due_days": 1 }`;
 }
 
 /**

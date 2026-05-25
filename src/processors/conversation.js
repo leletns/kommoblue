@@ -198,6 +198,26 @@ async function applyDecision(leadId, decision, summary, contact) {
     actions.push({ type: 'auto_reply_queued', message: decision.reply_message });
   }
 
+  // ── 7. Criar tarefa se IA decidiu ────────────────────────────────────────
+  if (decision.task_to_create) {
+    try {
+      const taskTypeMap = { call: 1, meeting: 2, email: 3, followup: 1 };
+      const dueDays = decision.task_to_create.due_days || 1;
+      const dueTimestamp = Math.floor(Date.now() / 1000) + (dueDays * 86400);
+
+      await kommo.createTask(leadId, {
+        text: decision.task_to_create.text,
+        completeTillTimestamp: dueTimestamp,
+        taskTypeId: taskTypeMap[decision.task_to_create.type] || 1,
+        responsibleUserId: summary.responsible_user_id,
+      });
+      logger.info(`[Processor] Tarefa criada para lead ${leadId}: "${decision.task_to_create.text}"`);
+      actions.push({ type: 'task_created', text: decision.task_to_create.text });
+    } catch (err) {
+      logger.error(`[Processor] Falha ao criar tarefa:`, err.message);
+    }
+  }
+
   return actions;
 }
 

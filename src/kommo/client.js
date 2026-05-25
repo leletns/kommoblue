@@ -221,7 +221,14 @@ async function getTalk(talkId) {
 }
 
 async function getTalksByLead(leadId) {
-  return fetchAllPages('/talks', { entity_id: leadId, entity_type: 'leads' });
+  try {
+    return await fetchAllPages('/talks', {
+      filter: { entity_id: leadId, entity_type: 'leads' }
+    });
+  } catch (err) {
+    // Fallback: flat params
+    return fetchAllPages('/talks', { entity_id: leadId, entity_type: 'leads' });
+  }
 }
 
 /**
@@ -261,6 +268,22 @@ async function acceptUnsorted(uid, pipelineId, statusId, responsibleUserId) {
   if (responsibleUserId) body.responsible_user_id = responsibleUserId;
 
   const res = await http.post(`/leads/unsorted/${uid}/accept`, body);
+  return res.data;
+}
+
+// ─── TAREFAS ───────────────────────────────────────────────────────────────
+
+async function createTask(leadId, { text, completeTillTimestamp, taskTypeId = 1, responsibleUserId }) {
+  const payload = {
+    entity_id: leadId,
+    entity_type: 'leads',
+    text,
+    complete_till: completeTillTimestamp || Math.floor(Date.now() / 1000) + 86400, // default: tomorrow
+    task_type_id: taskTypeId, // 1=call, 2=meeting, 3=email
+  };
+  if (responsibleUserId) payload.responsible_user_id = responsibleUserId;
+
+  const res = await http.post('/tasks', [payload]);
   return res.data;
 }
 
@@ -306,5 +329,6 @@ module.exports = {
   getLeadEvents,
   acceptUnsorted,
   addTagsToLead,
+  createTask,
   fetchAllPages,
 };

@@ -27,6 +27,23 @@ const NOTE_TYPE_LABELS = {
 };
 
 /**
+ * Detecta se uma nota foi gerada por um bot de IA (para filtrar do contexto).
+ */
+function isAiNote(note) {
+  const text = note.params?.text || note.text || '';
+  return (
+    text.includes('[IA]') ||
+    text.includes('IA|') ||
+    text.includes('[AI]') ||
+    text.includes('[IA - Varredura]') ||
+    text.includes('AGENTE IA') ||
+    (text.includes('Score:') && text.includes('/100')) ||
+    text.includes('Growth Blue') ||
+    text.includes('Análise interna gerada por IA')
+  );
+}
+
+/**
  * Carrega o contexto completo da conversa de um lead.
  */
 async function loadConversationContext(leadId) {
@@ -89,15 +106,19 @@ async function loadConversationContext(leadId) {
     });
   }
 
-  // Normaliza notas em mensagens
-  const normalizedNotes = notes.map((note) => ({
-    id: `note_${note.id}`,
-    timestamp: note.created_at,
-    direction: note.created_by === 0 ? 'inbound' : 'outbound',
-    author: note.created_by === 0 ? 'cliente' : `agente_${note.created_by}`,
-    type: NOTE_TYPE_LABELS[note.note_type] || `nota_${note.note_type}`,
-    text: extractNoteText(note),
-  }));
+  // Normaliza notas em mensagens (filtra notas de bots de IA antes de normalizar)
+  const normalizedNotes = notes
+    .filter((note) => !isAiNote(note))
+    .map((note) => ({
+      id: `note_${note.id}`,
+      timestamp: note.created_at,
+      // note_type 103 = whatsapp (inbound se params.from está definido ou created_by === 0)
+      // note_type 25 = mensagem enviada (outbound)
+      direction: note.created_by === 0 || note.note_type === 103 ? 'inbound' : 'outbound',
+      author: note.created_by === 0 || note.note_type === 103 ? 'cliente' : `agente_${note.created_by}`,
+      type: NOTE_TYPE_LABELS[note.note_type] || `nota_${note.note_type}`,
+      text: extractNoteText(note),
+    }));
 
   // Normaliza mensagens das talks (WhatsApp Lite)
   const normalizedTalkMsgs = talkMessages.map((msg) => ({
