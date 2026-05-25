@@ -195,18 +195,47 @@ app.get('/debug-api', async (req, res) => {
   results.tokenPresent = !!tokens?.access_token;
   results.tokenPreview = tokens?.access_token ? tokens.access_token.slice(0, 20) + '...' : 'none';
 
-  // Testa /leads (primeiro lead)
+  const { http } = kommoClient;
+
+  // Testa /leads (lista)
   try {
-    const { http } = kommoClient;
     const r = await http.get('/leads', { params: { limit: 1 } });
-    results.leads_test = { status: r.status, total: r.data?.['_page_count'], sample: r.data?._embedded?.leads?.length || 0 };
+    const firstLead = r.data?._embedded?.leads?.[0];
+    results.leads_list = { status: r.status, sample: firstLead ? { id: firstLead.id, name: firstLead.name } : null };
+
+    // Testa detalhe do primeiro lead
+    if (firstLead?.id) {
+      try {
+        const r2 = await http.get(`/leads/${firstLead.id}`, {
+          params: { with: 'contacts,pipeline,custom_fields_values' },
+        });
+        results.leads_detail = { status: r2.status, name: r2.data?.name };
+      } catch (e2) {
+        results.leads_detail = { error: e2.message, status: e2.response?.status };
+      }
+
+      // Testa notas
+      try {
+        const r3 = await http.get(`/leads/${firstLead.id}/notes`, { params: { limit: 1 } });
+        results.notes_test = { status: r3.status };
+      } catch (e3) {
+        results.notes_test = { error: e3.message, status: e3.response?.status };
+      }
+
+      // Testa talks
+      try {
+        const r4 = await http.get('/talks', { params: { entity_id: firstLead.id, entity_type: 'leads', limit: 1 } });
+        results.talks_test = { status: r4.status };
+      } catch (e4) {
+        results.talks_test = { error: e4.message, status: e4.response?.status };
+      }
+    }
   } catch (err) {
-    results.leads_test = { error: err.message, status: err.response?.status, body: err.response?.data };
+    results.leads_list = { error: err.message, status: err.response?.status, body: err.response?.data };
   }
 
   // Testa /leads/pipelines
   try {
-    const { http } = kommoClient;
     const r = await http.get('/leads/pipelines', { params: { limit: 10 } });
     results.pipelines_test = { status: r.status, count: r.data?._embedded?.pipelines?.length || 0 };
   } catch (err) {
@@ -215,7 +244,6 @@ app.get('/debug-api', async (req, res) => {
 
   // Testa /account
   try {
-    const { http } = kommoClient;
     const r = await http.get('/account');
     results.account_test = { status: r.status, name: r.data?.name, subdomain: r.data?.subdomain };
   } catch (err) {

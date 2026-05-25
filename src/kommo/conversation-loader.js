@@ -32,14 +32,45 @@ const NOTE_TYPE_LABELS = {
 async function loadConversationContext(leadId) {
   logger.info(`Carregando contexto completo do lead ${leadId}...`);
 
-  // Busca paralela para economizar tempo
-  const [lead, notes, talks] = await Promise.all([
-    kommo.getLead(leadId, { with: 'contacts,pipeline,loss_reason,source_id,custom_fields_values' }),
-    kommo.getLeadNotes(leadId),
-    kommo.getTalksByLead(leadId).catch(() => []),
-  ]);
+  // Busca lead principal (requisito mínimo — sem isso não há como continuar)
+  let lead;
+  try {
+    lead = await kommo.getLead(leadId, {
+      with: 'contacts,pipeline,loss_reason,source_id,custom_fields_values',
+    });
+  } catch (err) {
+    if (err.response?.status === 403) {
+      // Tenta sem o with=contacts caso o escopo de contatos não esteja habilitado
+      try {
+        lead = await kommo.getLead(leadId, {
+          with: 'pipeline,custom_fields_values',
+        });
+        logger.warn(`Lead ${leadId}: sem permissão contacts — carregado sem contato`);
+      } catch (err2) {
+        throw new Error(`403 ao carregar lead ${leadId}: ${err2.message}`);
+      }
+    } else {
+      throw err;
+    }
+  }
 
-  // Busca mensagens das talks em paralelo
+  // Notas — opcional, prossegue sem elas em caso de 403
+  let notes = [];
+  try {
+    notes = await kommo.getLeadNotes(leadId);
+  } catch (err) {
+    logger.warn(`Lead ${leadId}: sem permissão para notas (${err.response?.status}) — continuando sem notas`);
+  }
+
+  // Talks (WhatsApp Lite) — opcional
+  let talks = [];
+  try {
+    talks = await kommo.getTalksByLead(leadId);
+  } catch (err) {
+    logger.warn(`Lead ${leadId}: sem permissão para talks (${err.response?.status}) — continuando sem talks`);
+  }
+
+  // Mensagens das talks
   const talkMessages = [];
   if (talks.length > 0) {
     const allTalkMsgs = await Promise.all(
@@ -48,11 +79,14 @@ async function loadConversationContext(leadId) {
     allTalkMsgs.forEach((msgs) => talkMessages.push(...msgs));
   }
 
-  // Busca contato principal com campos customizados
+  // Contato principal — opcional
   let contact = null;
   const contactId = lead._embedded?.contacts?.[0]?.id;
   if (contactId) {
-    contact = await kommo.getContact(contactId).catch(() => null);
+    contact = await kommo.getContact(contactId).catch((err) => {
+      logger.warn(`Lead ${leadId}: sem permissão para contato ${contactId} (${err.response?.status})`);
+      return null;
+    });
   }
 
   // Normaliza notas em mensagens
