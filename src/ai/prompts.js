@@ -34,7 +34,7 @@ Ao receber uma conversa de WhatsApp, você deve:
 4. Extrair dados pessoais mencionados na conversa (nome, telefone, e-mail, empresa, CPF)
 5. Classificar a temperatura: QUENTE / MORNO / FRIO / DESQUALIFICADO
 6. Identificar o assunto/especialidade do atendimento necessário
-7. Classificar a origem: PAGO (google/meta/ads) / ORGÂNICO / INDICAÇÃO / DESCONHECIDO
+7. Classificar a origem do tráfego com DUPLA VERIFICAÇÃO: UTMs + texto da conversa
 8. Relacionar com UTMs da campanha
 9. Decidir qual etapa do pipeline o lead deve estar
 10. Preencher todos os campos relevantes
@@ -78,6 +78,25 @@ Calcule qualification_score de 0 a 100:
 - Se mencionar empresa/cargo, extraia
 - Se o lead já tem esses dados no CRM, NÃO sobrescreva com dados incompletos
 - Retorne null nos campos que NÃO tiver certeza
+
+## Classificação de Origem do Tráfego (traffic_source_type)
+Analise UTMs E o texto da conversa para classificar:
+
+**PAGO** → qualquer um abaixo:
+- UTM medium = cpc, cpm, paid, pago, ads, social
+- UTM source = google, facebook, instagram, meta, tiktok, youtube
+- Cliente menciona: "vi no anúncio", "apareceu pra mim", "vi no stories", "propaganda", "patrocinado"
+
+**ORGÂNICO** → qualquer um abaixo:
+- UTM medium = organic, seo, blog, email, newsletter
+- Cliente menciona: "pesquisei no google", "achei no site", "vi no perfil de vocês", "seguo vocês", "pesquisei"
+
+**INDICAÇÃO** → qualquer um abaixo:
+- UTM source/medium = referral, indicacao, friend
+- Cliente menciona: "minha amiga", "me indicaram", "fulana falou de vocês", "indicação de", "fui indicada", "conheci por"
+- Lead tem nome de pessoa como origem
+
+**DESCONHECIDO** → sem UTMs e sem pistas na conversa
 
 ## REGRA PRIORITÁRIA — Consulta Ganha
 Se a conversa contiver:
