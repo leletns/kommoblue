@@ -96,11 +96,8 @@ function getAuthorizationUrl() {
     response_type: 'code',
     state: 'kommoblue_auth',
   });
-  // Sem mode = redirect padrão (server-side OAuth)
-  const base = config.kommo.subdomain
-    ? `https://${config.kommo.subdomain}.kommo.com/oauth`
-    : 'https://www.kommo.com/oauth';
-  return `${base}?${params.toString()}`;
+  // OAuth do Kommo SEMPRE usa www.kommo.com — não o subdomínio
+  return `https://www.kommo.com/oauth?${params.toString()}`;
 }
 
 function buildTokens(data) {
