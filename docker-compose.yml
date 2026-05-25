@@ -1,0 +1,46 @@
+version: '3.9'
+
+services:
+  app:
+    build: .
+    container_name: kommoblue-agent
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - KOMMO_SUBDOMAIN=${KOMMO_SUBDOMAIN}
+      - KOMMO_CLIENT_ID=${KOMMO_CLIENT_ID}
+      - KOMMO_CLIENT_SECRET=${KOMMO_CLIENT_SECRET}
+      - KOMMO_REDIRECT_URI=${KOMMO_REDIRECT_URI}
+      - KOMMO_ACCESS_TOKEN=${KOMMO_ACCESS_TOKEN}
+      - KOMMO_REFRESH_TOKEN=${KOMMO_REFRESH_TOKEN}
+      - KOMMO_TOKEN_EXPIRES_AT=${KOMMO_TOKEN_EXPIRES_AT}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - AI_MODEL=${AI_MODEL:-claude-opus-4-7}
+      - AGENT_LANGUAGE=${AGENT_LANGUAGE:-pt-BR}
+      - AGENT_AUTO_REPLY=${AGENT_AUTO_REPLY:-false}
+      - AI_CONTEXT_MAX_MESSAGES=${AI_CONTEXT_MAX_MESSAGES:-50}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Opcional: ngrok para expor localhost durante desenvolvimento
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: kommoblue-ngrok
+    profiles: ["dev"]
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command: http app:3000
+    ports:
+      - "4040:4040"
+    depends_on:
+      - app
