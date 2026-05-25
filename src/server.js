@@ -81,15 +81,22 @@ app.get('/auth/kommo', (req, res) => {
 });
 
 app.get('/auth/kommo/callback', async (req, res) => {
-  const { code, error } = req.query;
+  const { code, error, error_description } = req.query;
+
+  logger.info('OAuth callback recebido — query params:', JSON.stringify(req.query));
 
   if (error) {
-    logger.error('OAuth error:', error);
-    return res.status(400).send(`Erro OAuth: ${error}`);
+    logger.error('OAuth error:', error, error_description);
+    return res.status(400).send(`Erro OAuth: ${error} — ${error_description || ''}`);
   }
 
   if (!code) {
-    return res.status(400).send('Código de autorização não recebido');
+    logger.warn('Callback sem code. Params recebidos:', JSON.stringify(req.query));
+    return res.status(400).send(
+      `<h2>Código de autorização não recebido</h2>
+       <p>Params: ${JSON.stringify(req.query)}</p>
+       <p>Verifique se o Redirect URI na integração Kommo está exatamente igual ao KOMMO_REDIRECT_URI do Railway.</p>`
+    );
   }
 
   try {

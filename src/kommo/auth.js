@@ -87,14 +87,21 @@ async function getValidToken() {
 
 /**
  * Gera a URL de autorização OAuth para o setup inicial.
+ * Usa mode=popup para fluxo server-side com redirect.
  */
 function getAuthorizationUrl() {
   const params = new URLSearchParams({
     client_id: config.kommo.clientId,
-    mode: 'post_message',
+    mode: 'popup',
     redirect_uri: config.kommo.redirectUri,
+    response_type: 'code',
+    state: 'kommoblue_auth',
   });
-  return `https://www.kommo.com/oauth?${params.toString()}`;
+  // URL base usa o subdomínio da conta
+  const base = config.kommo.subdomain
+    ? `https://${config.kommo.subdomain}.kommo.com/oauth`
+    : 'https://www.kommo.com/oauth';
+  return `${base}?${params.toString()}`;
 }
 
 function buildTokens(data) {
