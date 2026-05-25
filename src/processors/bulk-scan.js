@@ -48,6 +48,28 @@ const DATA_PATTERNS = [
   /\bmatricula\b/i,
 ];
 
+/**
+ * Detecta se uma nota foi gerada por bot/IA — deve ser ignorada.
+ * Inclui Growth Blue OS, nosso próprio agente, SalesBot, etc.
+ */
+function isAiBotNote(note) {
+  const text = (note.params?.text || note.text || '').toLowerCase();
+  return (
+    text.includes('[ia]') ||
+    text.includes('ia|') ||
+    text.includes('[ai]') ||
+    text.includes('[ia - varredura]') ||
+    text.includes('agente ia') ||
+    text.includes('growth blue') ||
+    text.includes('análise interna gerada por ia') ||
+    text.includes('score:') ||
+    text.includes('salesbot:') ||
+    text.includes('assim pode avaliar') ||
+    // Nota muito curta tipo "lead..." = truncada do bot
+    (text.length < 20 && text.includes('lead'))
+  );
+}
+
 function detectPaymentAndData(messages) {
   const allText = messages.map((m) => m.text || '').join('\n').toLowerCase();
   const hasPayment = PAYMENT_PATTERNS.some((p) => p.test(allText));
@@ -125,14 +147,13 @@ async function runScan({ onlyActive, delayMs }) {
     addLog('info', 'Buscando leads com dados enriquecidos...');
     let allLeads;
     try {
-      const params = { with: 'contacts,tags,custom_fields_values' };
+      // with=chats tenta trazer referência de conversa embutida no lead
+      const params = { with: 'contacts,tags,custom_fields_values,chats' };
       if (onlyActive) params.filter = { statuses: [{ pipeline_id: 0, status_id: 0 }] };
       allLeads = await kommo.fetchAllPages('/leads', params);
     } catch (err) {
-      // Fallback: busca sem with se também der 403
-      addLog('error', `Erro com with= (${err.response?.status}), tentando sem enriquecimento...`);
       try {
-        const params = {};
+        const params = { with: 'contacts,tags,custom_fields_values' };
         if (onlyActive) params.filter = { statuses: [{ pipeline_id: 0, status_id: 0 }] };
         allLeads = await kommo.fetchAllPages('/leads', params);
       } catch (err2) {
@@ -217,15 +238,18 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines) {
     logger.warn(`[BulkScan] Lead ${leadId}: sem acesso a talks (${err.response?.status})`);
   }
 
-  // Normaliza notas em mensagens
+  // Normaliza notas — FILTRA notas de IA/bots antes de mandar pro Claude
   const normalizedNotes = notes
-    .filter((n) => n.params?.text || n.text)
+    .filter((n) => !isAiBotNote(n))           // remove notas do Growth Blue OS, [IA], etc.
+    .filter((n) => n.params?.text || n.text)  // deve ter texto real
     .map((n) => ({
       id: `note_${n.id}`,
       timestamp: n.created_at,
-      direction: n.created_by === 0 ? 'inbound' : 'outbound',
+      // WhatsApp inbound = note_type 103 ou created_by=0 (sistema)
+      direction: (n.note_type === 103 || n.created_by === 0) ? 'inbound' : 'outbound',
       text: n.params?.text || n.text || '',
-      type: 'nota',
+      type: n.note_type === 103 ? 'whatsapp' : n.note_type === 25 ? 'whatsapp' : 'nota',
+      note_type: n.note_type,
     }));
 
   // Normaliza msgs WhatsApp
@@ -244,10 +268,14 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines) {
     .slice(-config.agent.maxContextMessages);
 
   if (messages.length === 0) {
+    // Sem mensagens reais — registra mas não pula nem gasta tokens de IA
     scanState.skipped++;
-    addLog('skip', `Lead ${leadId} (${lead.name || 'sem nome'}): sem mensagens`);
+    addLog('skip', `Lead ${leadId} (${lead.name || 'sem nome'}): sem conversa acessível via API`);
     return;
   }
+
+  logger.info(`[BulkScan] Lead ${leadId}: ${messages.length} msgs (${normalizedNotes.length} notas + ${normalizedTalkMsgs.length} whatsapp)`);
+
 
   // Detecta comprovante + CPF → GANHO imediato
   const detection = detectPaymentAndData(messages);
