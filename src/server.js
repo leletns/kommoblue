@@ -390,15 +390,48 @@ app.get('/debug-lead/:id', async (req, res) => {
     result.talks_error = { status: err.response?.status, message: err.message };
   }
 
-  // Talks via flat params (fallback)
+  // Testa /chats (endpoint alternativo para WhatsApp Lite)
   try {
-    const talksRes2 = await http.get('/talks', {
-      params: { entity_id: leadId, entity_type: 'leads', limit: 5 },
+    const chatsRes = await http.get('/chats', {
+      params: { 'filter[entity_id]': leadId, 'filter[entity_type]': 'leads', limit: 5 },
     });
-    result.talks_flat_count = talksRes2.data?._embedded?.talks?.length ?? 0;
-    result.talks_flat_status = talksRes2.status;
+    const chats = chatsRes.data?._embedded?.chats || [];
+    result.chats_count = chats.length;
+    result.chats_status = chatsRes.status;
+    result.chats_sample = chats.slice(0, 2);
+
+    // Tenta buscar mensagens de chats
+    if (chats.length > 0) {
+      try {
+        const chatMsgRes = await http.get(`/chats/${chats[0].id}/messages`, { params: { limit: 5 } });
+        result.chat_msgs_count = chatMsgRes.data?._embedded?.messages?.length ?? 0;
+        result.chat_msgs_sample = (chatMsgRes.data?._embedded?.messages || []).slice(0, 3).map((m) => ({
+          author_type: m.author?.type,
+          text: (m.content?.text || '').slice(0, 100),
+        }));
+      } catch (err2) {
+        result.chat_msgs_error = { status: err2.response?.status, msg: err2.message };
+      }
+    }
   } catch (err) {
-    result.talks_flat_error = { status: err.response?.status, message: err.message };
+    result.chats_error = { status: err.response?.status, message: err.message };
+  }
+
+  // Testa /events (histórico de eventos — pode conter mensagens WhatsApp)
+  try {
+    const evtRes = await http.get('/events', {
+      params: { 'filter[entity][id][]': leadId, 'filter[entity][type]': 'lead', limit: 10 },
+    });
+    const events = evtRes.data?._embedded?.events || [];
+    result.events_count = events.length;
+    result.events_types = [...new Set(events.map((e) => e.type))];
+    result.events_sample = events.slice(0, 3).map((e) => ({
+      type: e.type,
+      entity_type: e.entity?.type,
+      created_at: new Date(e.created_at * 1000).toLocaleString('pt-BR'),
+    }));
+  } catch (err) {
+    result.events_error = { status: err.response?.status, message: err.message };
   }
 
   // Lead embedded
