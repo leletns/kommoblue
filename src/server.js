@@ -77,6 +77,23 @@ app.post('/webhook/kommo', async (req, res) => {
 app.get('/auth/kommo', (req, res) => {
   const url = auth.getAuthorizationUrl();
   logger.info(`Redirecionando para OAuth Kommo: ${url}`);
+
+  // Se ?debug=1, mostra a URL em vez de redirecionar
+  if (req.query.debug) {
+    return res.send(`
+      <h2>URL de autorização gerada:</h2>
+      <a href="${url}" target="_blank">${url}</a>
+      <br><br>
+      <p>Clique no link acima para autorizar</p>
+      <h3>Config:</h3>
+      <pre>${JSON.stringify({
+        subdomain: config.kommo.subdomain,
+        clientId: config.kommo.clientId ? config.kommo.clientId.slice(0,8)+'...' : 'NÃO DEFINIDO',
+        redirectUri: config.kommo.redirectUri,
+      }, null, 2)}</pre>
+    `);
+  }
+
   res.redirect(url);
 });
 
