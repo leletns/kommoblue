@@ -91,7 +91,7 @@ function stopScan() {
 /**
  * Inicia a varredura completa em background.
  */
-async function startBulkScan({ onlyActive = false, delayMs = 3500 } = {}) {
+async function startBulkScan({ onlyActive = false, delayMs = 6000 } = {}) {
   if (scanState.running) return { error: 'Varredura já em andamento' };
 
   Object.assign(scanState, {
@@ -195,7 +195,15 @@ async function runScan({ onlyActive, delayMs }) {
       }
 
       scanState.processed++;
+
+      // Pausa normal entre leads
       await sleep(delayMs);
+
+      // A cada 50 leads: pausa de 30s para respeitar rate limit da Kommo
+      if (scanState.processed > 0 && scanState.processed % 50 === 0) {
+        addLog('info', `⏸ Pausa de 30s após ${scanState.processed} leads (proteção rate limit)...`);
+        await sleep(30000);
+      }
     }
   } finally {
     scanState.running = false;
