@@ -161,7 +161,7 @@ async function applyDecision(leadId, decision, summary, contact) {
   // ── 3. Atualizar campos customizados de qualificação no lead ──────────────
   if (decision.qualification) {
     try {
-      await updateQualificationFields(leadId, decision.qualification, decision.persona, summary);
+      await updateQualificationFields(leadId, decision.qualification, decision.persona, summary, decision);
       actions.push({ type: 'qualification_saved', score: decision.qualification.score });
     } catch (err) {
       logger.error(`[Processor] Falha ao salvar qualificação:`, err.message);
@@ -169,7 +169,7 @@ async function applyDecision(leadId, decision, summary, contact) {
   }
 
   // ── 4. Adicionar tags ─────────────────────────────────────────────────────
-  const allTags = buildTags(decision);
+  const allTags = buildTags(decision, summary);
   if (allTags.length > 0) {
     try {
       await kommo.addTagsToLead(leadId, allTags);
@@ -205,7 +205,7 @@ async function applyDecision(leadId, decision, summary, contact) {
  * Atualiza campos customizados de qualificação no lead.
  * Usa os field_codes padrão — ajuste conforme seus campos no Kommo.
  */
-async function updateQualificationFields(leadId, qualification, persona, summary) {
+async function updateQualificationFields(leadId, qualification, persona, summary, decision) {
   // Monta campos customizados para atualizar
   // Os field_codes abaixo devem existir no seu Kommo.
   // Se não existirem, o Kommo ignora silenciosamente.
@@ -267,6 +267,31 @@ async function updateQualificationFields(leadId, qualification, persona, summary
     });
   }
 
+  // Temperatura
+  if (decision.temperature) {
+    customFieldsValues.push({
+      field_code: 'LEAD_TEMPERATURE',
+      values: [{ value: decision.temperature }],
+    });
+  }
+
+  // Especialidade/assunto
+  if (decision.subject_specialist) {
+    customFieldsValues.push({
+      field_code: 'SUBJECT_SPECIALIST',
+      values: [{ value: decision.subject_specialist }],
+    });
+  }
+
+  // Origem do tráfego
+  const trafficSrc = decision.traffic_source_type || classifyUtmSource(summary?.utms);
+  if (trafficSrc) {
+    customFieldsValues.push({
+      field_code: 'TRAFFIC_SOURCE_TYPE',
+      values: [{ value: trafficSrc }],
+    });
+  }
+
   if (customFieldsValues.length === 0) return;
 
   await kommo.updateLeadCustomFields(leadId, customFieldsValues);
@@ -274,25 +299,52 @@ async function updateQualificationFields(leadId, qualification, persona, summary
 }
 
 /**
- * Monta tags automáticas com base na qualificação e persona.
+ * Monta tags automáticas com base na qualificação, persona e origem.
  */
-function buildTags(decision) {
+function buildTags(decision, summary) {
   const tags = [...(decision.tags_to_add || [])];
 
-  // Tag de score
+  // Temperatura
+  if (decision.temperature) tags.push(`temp-${decision.temperature}`);
+
+  // Score de qualificação
   const scoreLabel = decision.qualification?.score_label;
   if (scoreLabel) tags.push(`ia-${scoreLabel}`);
 
-  // Tag de urgência
+  // Urgência
   if (decision.urgency === 'alta') tags.push('urgente');
   if (decision.urgency === 'critica') tags.push('critico');
 
-  // Tag de intenção
+  // Intenção
   if (decision.client_intent === 'comprar') tags.push('pronto-comprar');
   if (decision.client_intent === 'desistir') tags.push('desistencia');
 
-  // Tag de UTM source se relevante
-  return [...new Set(tags)]; // Remove duplicatas
+  // Especialidade/assunto
+  if (decision.subject_specialist) {
+    const subjectTag = decision.subject_specialist
+      .toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 30);
+    if (subjectTag) tags.push(`assunto-${subjectTag}`);
+  }
+
+  // Origem do tráfego (da IA ou dos UTMs)
+  const src = decision.traffic_source_type || classifyUtmSource(summary?.utms);
+  if (src === 'pago') tags.push('trafego-pago');
+  else if (src === 'organico') tags.push('trafego-organico');
+  else if (src === 'indicacao') tags.push('indicacao');
+
+  return [...new Set(tags)];
+}
+
+function classifyUtmSource(utms) {
+  if (!utms) return 'desconhecido';
+  const source = (utms.source || '').toLowerCase();
+  const medium = (utms.medium || '').toLowerCase();
+  const paidSources = ['google', 'facebook', 'instagram', 'meta', 'youtube', 'tiktok'];
+  const paidMediums = ['cpc', 'cpm', 'paid', 'pago', 'ads'];
+  if (paidSources.some((s) => source.includes(s)) && paidMediums.some((m) => medium.includes(m))) return 'pago';
+  if (['organic', 'seo', 'organico'].some((m) => medium.includes(m))) return 'organico';
+  if (['referral', 'indicacao', 'indicação'].some((s) => source.includes(s) || medium.includes(s))) return 'indicacao';
+  return 'desconhecido';
 }
 
 /**

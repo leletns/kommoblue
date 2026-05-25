@@ -203,6 +203,90 @@ app.get('/status', async (req, res) => {
   res.json(status);
 });
 
+// ─── Varredura em massa ───────────────────────────────────────────────────────
+
+app.post('/scan', async (req, res) => {
+  const { startBulkScan } = require('./processors/bulk-scan');
+  const onlyActive = req.query.only_active === 'true';
+  const delayMs = parseInt(req.query.delay || '2000', 10);
+
+  const result = await startBulkScan({ onlyActive, delayMs });
+  res.json(result);
+});
+
+app.get('/scan/status', (req, res) => {
+  const { getScanStatus } = require('./processors/bulk-scan');
+  res.json(getScanStatus());
+});
+
+// Painel visual da varredura
+app.get('/scan', (req, res) => {
+  res.send(`
+    <html><head>
+      <meta charset="utf-8">
+      <title>Varredura — Kommo Blue</title>
+      <style>
+        body{font-family:sans-serif;max-width:800px;margin:40px auto;padding:0 20px}
+        .btn{background:#7c3aed;color:#fff;border:none;padding:12px 28px;border-radius:8px;cursor:pointer;font-size:16px;margin-right:10px}
+        .btn:hover{background:#6d28d9}
+        .btn-sec{background:#059669}
+        .progress{background:#e5e7eb;border-radius:8px;height:24px;margin:16px 0}
+        .progress-bar{background:#7c3aed;height:100%;border-radius:8px;transition:width .5s;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px}
+        .log{background:#111;color:#0f0;padding:16px;border-radius:8px;height:300px;overflow-y:auto;font-size:12px;font-family:monospace}
+        .stat{display:inline-block;background:#f3f4f6;border-radius:8px;padding:12px 20px;margin:8px;text-align:center}
+        .stat b{display:block;font-size:28px;color:#7c3aed}
+        .won{color:#059669} .moved{color:#2563eb} .error{color:#dc2626} .skip{color:#9ca3af}
+      </style>
+    </head><body>
+      <h1>🔍 Varredura em Massa — Kommo Blue</h1>
+      <p>Processa TODOS os leads do Kommo: detecta comprovantes + CPF, qualifica e move pipelines automaticamente.</p>
+
+      <button class="btn" onclick="startScan(false)">▶ Varrer TODOS os leads</button>
+      <button class="btn btn-sec" onclick="startScan(true)">▶ Varrer apenas ativos</button>
+
+      <div id="stats" style="margin-top:20px"></div>
+      <div class="progress"><div class="progress-bar" id="bar" style="width:0%">0%</div></div>
+      <div class="log" id="log">Aguardando início da varredura...</div>
+
+      <script>
+        let interval;
+        async function startScan(onlyActive) {
+          if(!confirm('Iniciar varredura? Isso pode levar vários minutos.')) return;
+          await fetch('/scan?only_active='+onlyActive, {method:'POST'});
+          clearInterval(interval);
+          interval = setInterval(updateStatus, 2000);
+          updateStatus();
+        }
+        async function updateStatus() {
+          const r = await fetch('/scan/status');
+          const d = await r.json();
+          const p = d.progress_percent || 0;
+          document.getElementById('bar').style.width = p+'%';
+          document.getElementById('bar').textContent = p+'%';
+          document.getElementById('stats').innerHTML =
+            '<div class="stat"><b>'+d.total+'</b>Total</div>'+
+            '<div class="stat"><b>'+d.processed+'</b>Processados</div>'+
+            '<div class="stat" style="color:#059669"><b>'+d.won+'</b>Ganhos 🎉</div>'+
+            '<div class="stat" style="color:#2563eb"><b>'+d.moved+'</b>Movidos</div>'+
+            '<div class="stat" style="color:#dc2626"><b>'+d.errors+'</b>Erros</div>'+
+            (d.currentLead ? '<div class="stat"><b style="font-size:14px">'+d.currentLead.name+'</b>Processando</div>' : '');
+          const log = (d.log||[]).map(l => {
+            const cls = l.type==='won'?'won':l.type==='moved'?'moved':l.type==='error'?'error':'skip';
+            return '<div class="'+cls+'">['+l.time+'] '+l.message+'</div>';
+          }).join('');
+          document.getElementById('log').innerHTML = log || 'Sem logs ainda...';
+          if(!d.running && d.finishedAt) {
+            clearInterval(interval);
+            document.getElementById('bar').style.background = '#059669';
+          }
+        }
+        // Atualiza status ao carregar se já houver varredura
+        updateStatus();
+      </script>
+    </body></html>
+  `);
+});
+
 // ─── Rota de teste manual ────────────────────────────────────────────────────
 
 app.post('/analyze/:leadId', async (req, res) => {
