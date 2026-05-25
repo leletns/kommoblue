@@ -51,23 +51,40 @@ const DATA_PATTERNS = [
 /**
  * Detecta se uma nota foi gerada por bot/IA — deve ser ignorada.
  * Inclui Growth Blue OS, nosso próprio agente, SalesBot, etc.
+ *
+ * IMPORTANTE: Não use checagens muito amplas (ex: "score:" sozinho) pois
+ * filtrariam mensagens reais de clientes.
  */
 function isAiBotNote(note) {
   const text = (note.params?.text || note.text || '').toLowerCase();
-  return (
-    text.includes('[ia]') ||
-    text.includes('ia|') ||
-    text.includes('[ai]') ||
-    text.includes('[ia - varredura]') ||
-    text.includes('agente ia') ||
+
+  // Marcadores explícitos de bot/IA
+  if (
+    text.startsWith('[ia]') ||
+    text.startsWith('[ai]') ||
+    text.startsWith('[ia - varredura]') ||
+    text.startsWith('ia|') ||
     text.includes('growth blue') ||
     text.includes('análise interna gerada por ia') ||
-    text.includes('score:') ||
     text.includes('salesbot:') ||
     text.includes('assim pode avaliar') ||
-    // Nota muito curta tipo "lead..." = truncada do bot
-    (text.length < 20 && text.includes('lead'))
-  );
+    text.includes('[ia - varredura]') ||
+    text.includes('agente ia —') ||
+    text.includes('kommo blue')
+  ) {
+    return true;
+  }
+
+  // Padrão específico do Growth Blue OS: "Score: X/100" + termos de qualificação
+  // (não filtra se o cliente mencionar "score" em outro contexto)
+  if (/score:\s*\d+\/100/i.test(text) && (
+    text.includes('quente') || text.includes('morno') || text.includes('frio') ||
+    text.includes('bant:') || text.includes('qualificação') || text.includes('urgência:')
+  )) {
+    return true;
+  }
+
+  return false;
 }
 
 function detectPaymentAndData(messages) {
@@ -233,17 +250,38 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines) {
     logger.warn(`[BulkScan] Lead ${leadId}: sem acesso a notas (403), continuando`);
   }
 
-  // Busca talks WhatsApp Lite (opcional — silencia 403/404)
+  // Busca talks WhatsApp Lite — tenta via filter E via embedded do lead
   let talkMessages = [];
+  const talkIdsSeen = new Set();
+
+  // 1) Chats embutidos no lead (quando fetched com with=chats)
+  const embeddedChats = lead._embedded?.chats || [];
+  for (const chat of embeddedChats) {
+    const chatId = chat.id || chat.talk_id;
+    if (chatId && !talkIdsSeen.has(chatId)) {
+      talkIdsSeen.add(chatId);
+      try {
+        const msgs = await kommo.getTalkMessages(chatId);
+        talkMessages.push(...msgs);
+      } catch (err) {
+        logger.warn(`[BulkScan] Lead ${leadId}: erro ao buscar msgs chat embutido ${chatId}: ${err.response?.status}`);
+      }
+    }
+  }
+
+  // 2) Busca via filtro (complementa caso embedded não tenha todos)
   try {
     const talks = await kommo.getTalksByLead(leadId);
-    if (talks.length > 0) {
-      const allMsgs = await Promise.all(talks.map((t) => kommo.getTalkMessages(t.id)));
-      allMsgs.forEach((msgs) => talkMessages.push(...msgs));
+    const newTalks = talks.filter((t) => !talkIdsSeen.has(t.id));
+    if (newTalks.length > 0) {
+      const allMsgs = await Promise.all(newTalks.map((t) => kommo.getTalkMessages(t.id)));
+      allMsgs.forEach((msgs, i) => {
+        talkIdsSeen.add(newTalks[i].id);
+        talkMessages.push(...msgs);
+      });
     }
   } catch (err) {
-    if (![403, 404].includes(err.response?.status)) throw err;
-    logger.warn(`[BulkScan] Lead ${leadId}: sem acesso a talks (${err.response?.status})`);
+    logger.warn(`[BulkScan] Lead ${leadId}: erro ao buscar talks (${err.response?.status})`);
   }
 
   // Normaliza notas — FILTRA notas de IA/bots antes de mandar pro Claude
@@ -269,6 +307,16 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines) {
     type: 'whatsapp',
   }));
 
+  // Log diagnóstico: mostra o que veio da API antes e depois do filtro
+  const rawNoteTypes = [...new Set(notes.map((n) => n.note_type))].join(',') || 'nenhum';
+  const filteredBotCount = notes.filter((n) => isAiBotNote(n)).length;
+  const noTextCount = notes.filter((n) => !isAiBotNote(n) && !n.params?.text && !n.text).length;
+  logger.info(
+    `[BulkScan] Lead ${leadId}: ${notes.length} notas (tipos: ${rawNoteTypes}), ` +
+    `${filteredBotCount} bot-filtradas, ${noTextCount} sem texto, ` +
+    `${talkMessages.length} msgs talks`
+  );
+
   const seen = new Set();
   const messages = [...normalizedNotes, ...normalizedTalkMsgs]
     .filter((m) => { if (seen.has(m.id)) return false; seen.add(m.id); return true; })
@@ -276,9 +324,12 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines) {
     .slice(-config.agent.maxContextMessages);
 
   if (messages.length === 0) {
-    // Sem mensagens reais — registra mas não pula nem gasta tokens de IA
+    // Sem mensagens reais — avisa no log com diagnóstico detalhado
+    const reason = notes.length === 0 ? 'sem notas na API' :
+      filteredBotCount === notes.length ? `${filteredBotCount} notas de bot filtradas` :
+      'notas sem texto';
+    addLog('skip', `Lead ${leadId} (${lead.name || 'sem nome'}): sem conversa (${reason}) — pulando`);
     scanState.skipped++;
-    addLog('skip', `Lead ${leadId} (${lead.name || 'sem nome'}): sem conversa acessível via API`);
     return;
   }
 

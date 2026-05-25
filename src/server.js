@@ -325,6 +325,102 @@ app.get('/status', async (req, res) => {
   res.json(status);
 });
 
+// ─── Debug de lead específico ─────────────────────────────────────────────────
+
+/**
+ * GET /debug-lead/:id
+ * Mostra TODOS os dados brutos de um lead: notas, talks, tipos, textos.
+ * Use para diagnosticar por que o lead não tem conversa visível.
+ */
+app.get('/debug-lead/:id', async (req, res) => {
+  const leadId = parseInt(req.params.id, 10);
+  if (isNaN(leadId)) return res.status(400).json({ error: 'leadId inválido' });
+
+  const { http } = kommo;
+  const result = { leadId };
+
+  // Notas raw
+  try {
+    const notesRes = await http.get(`/leads/${leadId}/notes`, { params: { limit: 50 } });
+    const notes = notesRes.data?._embedded?.notes || [];
+    result.notes_count = notes.length;
+    result.note_types = [...new Set(notes.map((n) => n.note_type))];
+    result.notes_sample = notes.slice(0, 10).map((n) => ({
+      id: n.id,
+      note_type: n.note_type,
+      created_by: n.created_by,
+      created_at: new Date(n.created_at * 1000).toLocaleString('pt-BR'),
+      text_preview: (n.params?.text || n.text || '').slice(0, 120),
+      params_keys: Object.keys(n.params || {}),
+    }));
+  } catch (err) {
+    result.notes_error = { status: err.response?.status, message: err.message };
+  }
+
+  // Talks via filter[entity_id]
+  try {
+    const talksRes = await http.get('/talks', {
+      params: { 'filter[entity_id]': leadId, 'filter[entity_type]': 'leads', limit: 10 },
+    });
+    const talks = talksRes.data?._embedded?.talks || [];
+    result.talks_count = talks.length;
+    result.talks_sample = talks.slice(0, 3).map((t) => ({
+      id: t.id,
+      entity_id: t.entity_id,
+      entity_type: t.entity_type,
+      source_uid: t.source_uid,
+    }));
+
+    if (talks.length > 0) {
+      try {
+        const msgsRes = await http.get(`/talks/${talks[0].id}/messages`, { params: { limit: 10 } });
+        const msgs = msgsRes.data?._embedded?.messages || [];
+        result.talk_msgs_count = msgs.length;
+        result.talk_msgs_sample = msgs.slice(0, 5).map((m) => ({
+          id: m.id,
+          author_type: m.author?.type,
+          content_type: m.content?.type,
+          text: (m.content?.text || '').slice(0, 100),
+        }));
+      } catch (err2) {
+        result.talk_msgs_error = { status: err2.response?.status, message: err2.message };
+      }
+    }
+  } catch (err) {
+    result.talks_error = { status: err.response?.status, message: err.message };
+  }
+
+  // Talks via flat params (fallback)
+  try {
+    const talksRes2 = await http.get('/talks', {
+      params: { entity_id: leadId, entity_type: 'leads', limit: 5 },
+    });
+    result.talks_flat_count = talksRes2.data?._embedded?.talks?.length ?? 0;
+    result.talks_flat_status = talksRes2.status;
+  } catch (err) {
+    result.talks_flat_error = { status: err.response?.status, message: err.message };
+  }
+
+  // Lead embedded
+  try {
+    const leadRes = await http.get('/leads', {
+      params: { 'filter[id]': leadId, with: 'contacts,tags,custom_fields_values,chats', limit: 1 },
+    });
+    const leads = leadRes.data?._embedded?.leads || [];
+    if (leads.length > 0) {
+      const l = leads[0];
+      result.lead_name = l.name;
+      result.lead_status_id = l.status_id;
+      result.lead_embedded_keys = Object.keys(l._embedded || {});
+      result.lead_embedded_chats = l._embedded?.chats || [];
+    }
+  } catch (err) {
+    result.lead_error = { status: err.response?.status, message: err.message };
+  }
+
+  res.json(result);
+});
+
 // ─── Varredura em massa ───────────────────────────────────────────────────────
 
 app.post('/scan', async (req, res) => {

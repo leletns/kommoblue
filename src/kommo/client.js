@@ -221,13 +221,31 @@ async function getTalk(talkId) {
 }
 
 async function getTalksByLead(leadId) {
+  // Kommo espera: /talks?filter[entity_id]=X&filter[entity_type]=leads
+  // Usando bracket notation direta como chave evita problema de serialização aninhada do axios
   try {
-    return await fetchAllPages('/talks', {
-      filter: { entity_id: leadId, entity_type: 'leads' }
+    const res = await http.get('/talks', {
+      params: {
+        'filter[entity_id]': leadId,
+        'filter[entity_type]': 'leads',
+        limit: 50,
+        page: 1,
+      },
     });
+    const talks = res.data?._embedded?.talks;
+    return Array.isArray(talks) ? talks : [];
   } catch (err) {
-    // Fallback: flat params
-    return fetchAllPages('/talks', { entity_id: leadId, entity_type: 'leads' });
+    if ([403, 404].includes(err.response?.status)) return [];
+    // Fallback: flat params sem filter[]
+    try {
+      const res2 = await http.get('/talks', {
+        params: { entity_id: leadId, entity_type: 'leads', limit: 50 },
+      });
+      const talks2 = res2.data?._embedded?.talks;
+      return Array.isArray(talks2) ? talks2 : [];
+    } catch (_) {
+      return [];
+    }
   }
 }
 
