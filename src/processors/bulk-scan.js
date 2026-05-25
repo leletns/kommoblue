@@ -299,8 +299,9 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines) {
     contact_custom_fields: [],
   };
 
-  // IA analisa
-  const decision = await analyzeConversation({ lead, contact: null, summary, messages, newMessage: null });
+  // IA analisa — usa Haiku para economizar custo no bulk scan (~$0.004/lead vs $0.08/lead no Opus)
+  const bulkModel = process.env.BULK_SCAN_MODEL || 'claude-haiku-4-5-20251001';
+  const decision = await analyzeConversation({ lead, contact: null, summary, messages, newMessage: null }, { modelOverride: bulkModel });
 
   // Aplica decisão
   const actions = await applyBulkDecision(leadId, decision, summary);
@@ -339,20 +340,28 @@ async function applyBulkDecision(leadId, decision, summary) {
     }
   }
 
-  if (decision.note_to_add) {
-    try {
-      const score = decision.qualification?.score;
-      const note = `📊 [IA] Score: ${score}/100 (${decision.qualification?.score_label || ''})\n${decision.analysis || ''}\n${decision.suggested_action ? '💡 ' + decision.suggested_action : ''}`.trim().slice(0, 1000);
-      await kommo.addLeadNote(leadId, { text: note });
-      actions.push({ type: 'note_added' });
-    } catch (_) {}
-  }
+  // Nota rica e personalizada com perfil real da lead
+  try {
+    const note = buildRichNote(decision, summary);
+    await kommo.addLeadNote(leadId, { text: note });
+    actions.push({ type: 'note_added' });
+  } catch (_) {}
 
-  const tags = ['ia-varrido'];
-  if (decision.qualification?.score_label) tags.push(`ia-${decision.qualification.score_label}`);
-  if (decision.temperature) tags.push(`temp-${decision.temperature}`);
+  // Tags significativas — sem "ia-varrido"
+  const tags = [];
+  const score = decision.qualification?.score;
+  const scoreLabel = decision.qualification?.score_label;
+  if (scoreLabel) tags.push(`ia-${scoreLabel}`); // ia-quente, ia-morno, ia-frio
+  if (decision.temperature) tags.push(decision.temperature); // quente, morno, frio
+  if (decision.subject_specialist) {
+    const subj = decision.subject_specialist.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 25);
+    if (subj) tags.push(subj); // ex: lipo, botox, consulta-estetica
+  }
   if (decision.client_intent === 'comprar') tags.push('pronto-comprar');
   if (decision.urgency === 'alta' || decision.urgency === 'critica') tags.push('urgente');
+  if (decision.traffic_source_type === 'pago') tags.push('trafego-pago');
+  else if (decision.traffic_source_type === 'organico') tags.push('trafego-organico');
+  else if (decision.traffic_source_type === 'indicacao') tags.push('indicacao');
 
   try {
     await kommo.addTagsToLead(leadId, [...new Set(tags)]);
@@ -378,6 +387,59 @@ async function applyBulkDecision(leadId, decision, summary) {
   }
 
   return actions;
+}
+
+/**
+ * Nota personalizada com perfil real da lead — não genérica.
+ */
+function buildRichNote(decision, summary) {
+  const score = decision.qualification?.score;
+  const scoreLabel = decision.qualification?.score_label || '';
+  const temp = decision.temperature || '';
+  const tempEmoji = { quente: '🔥', morno: '🌡️', frio: '❄️', desqualificado: '🚫' }[temp] || '📋';
+  const sentEmoji = { muito_positivo: '😄', positivo: '😊', neutro: '😐', negativo: '😟', muito_negativo: '😡' }[decision.sentiment] || '📝';
+
+  let note = `${tempEmoji} ${sentEmoji} Score: ${score ?? '?'}/100 (${scoreLabel}) | ${temp.toUpperCase()}\n`;
+
+  // Análise da conversa
+  if (decision.analysis) {
+    note += `\n📋 ${decision.analysis}\n`;
+  }
+
+  // Perfil da persona
+  const persona = decision.persona;
+  if (persona) {
+    const dados = [];
+    if (persona.extracted_name) dados.push(`Nome: ${persona.extracted_name}`);
+    if (persona.extracted_phone) dados.push(`Tel: ${persona.extracted_phone}`);
+    if (persona.extracted_email) dados.push(`Email: ${persona.extracted_email}`);
+    if (persona.extracted_company) dados.push(`Empresa: ${persona.extracted_company}`);
+    if (dados.length > 0) note += `\n👤 ${dados.join(' | ')}\n`;
+    if (persona.profile_type) note += `🧩 Perfil: ${persona.profile_type}\n`;
+    if (persona.pain_points?.length > 0) note += `❗ Dores: ${persona.pain_points.join(', ')}\n`;
+  }
+
+  // Assunto / especialidade
+  if (decision.subject_specialist) {
+    note += `🏥 Interesse: ${decision.subject_specialist}\n`;
+  }
+
+  // BANT
+  const bant = decision.qualification?.bant;
+  if (bant) {
+    const parts = [];
+    if (bant.budget && bant.budget !== 'desconhecido') parts.push(`Budget: ${bant.budget}${bant.budget_value ? ` (${bant.budget_value})` : ''}`);
+    if (bant.need && bant.need !== 'desconhecido') parts.push(`Necessidade: ${bant.need}`);
+    if (bant.timeline && bant.timeline !== 'desconhecido') parts.push(`Prazo: ${bant.timeline}`);
+    if (parts.length > 0) note += `📊 ${parts.join(' | ')}\n`;
+  }
+
+  // Próximo passo
+  if (decision.suggested_action) {
+    note += `\n💡 ${decision.suggested_action}`;
+  }
+
+  return note.slice(0, 1400);
 }
 
 function addLog(type, message) {

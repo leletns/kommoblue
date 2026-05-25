@@ -50,23 +50,26 @@ async function getPipelines() {
  * @param {{ summary, messages, newMessage? }} context - Contexto da conversa
  * @returns {AgentDecision} - Decisão estruturada do agente
  */
-async function analyzeConversation(context) {
+async function analyzeConversation(context, { modelOverride } = {}) {
   const client = getClient();
   const pipelines = await getPipelines();
 
   const systemPrompt = buildSystemPrompt(pipelines);
   const userPrompt = buildUserPrompt(context);
 
+  // Usa modelo configurado, mas permite override (ex: Haiku para bulk scan)
+  const model = modelOverride || config.anthropic.model;
+
   logger.info(
-    `Analisando conversa do lead ${context.summary.lead_id} (${context.messages.length} msgs)...`
+    `Analisando lead ${context.summary.lead_id} (${context.messages.length} msgs) com ${model}...`
   );
 
   const startTime = Date.now();
 
   try {
     const response = await client.messages.create({
-      model: config.anthropic.model,
-      max_tokens: 1024,
+      model,
+      max_tokens: 1500,
       system: [
         {
           type: 'text',
@@ -140,19 +143,28 @@ function parseDecision(rawText, summary) {
   try {
     const parsed = JSON.parse(jsonMatch[0]);
 
-    // Garante campos obrigatórios
+    // Garante todos os campos incluindo qualificação, persona e tarefa
     return {
       analysis: parsed.analysis || '',
+      persona: parsed.persona || null,
+      qualification: parsed.qualification || null,
+      temperature: parsed.temperature || null,
+      subject_specialist: parsed.subject_specialist || null,
+      traffic_source_type: parsed.traffic_source_type || null,
       sentiment: parsed.sentiment || 'neutro',
       client_intent: parsed.client_intent || 'outro',
       move_to_status_id: parsed.move_to_status_id || null,
       move_to_status_name: parsed.move_to_status_name || null,
       move_reason: parsed.move_reason || null,
+      update_lead_name: parsed.update_lead_name || null,
+      update_lead_value: parsed.update_lead_value || null,
+      update_contact: parsed.update_contact || null,
       note_to_add: parsed.note_to_add || null,
       tags_to_add: Array.isArray(parsed.tags_to_add) ? parsed.tags_to_add : [],
       urgency: parsed.urgency || 'media',
       suggested_action: parsed.suggested_action || '',
       reply_message: parsed.reply_message || null,
+      task_to_create: parsed.task_to_create || null,
     };
   } catch (err) {
     logger.error('Falha ao parsear JSON da IA:', err.message);
