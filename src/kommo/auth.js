@@ -3,27 +3,31 @@
 /**
  * Gerencia autenticação OAuth2 com o Kommo CRM.
  * Docs: https://www.kommo.com/developers/content/crm_platform/oauth/
+ *
+ * IMPORTANTE: Kommo exige application/x-www-form-urlencoded no token exchange,
+ * NÃO application/json. Enviar JSON causa 403 Forbidden no nginx deles.
  */
 
 const axios = require('axios');
+const qs = require('querystring');
 const config = require('../config');
 const tokenStore = require('../utils/token-store');
 const logger = require('../utils/logger');
 
-// Token exchange usa o subdomínio da conta (ex: comercialblueclinica.kommo.com)
-// Autorização usa www.kommo.com — troca de token usa SUBDOMAIN.kommo.com
+// Troca de token SEMPRE usa o subdomínio da conta
 function getTokenUrl() {
   return `https://${config.kommo.subdomain}.kommo.com/oauth2/access_token`;
 }
 
+const FORM_HEADERS = { 'Content-Type': 'application/x-www-form-urlencoded' };
+
 /**
  * Troca o authorization code por access + refresh token.
- * Chamado uma única vez durante o setup inicial.
  */
 async function exchangeCode(code) {
-  logger.info('Trocando authorization code por tokens...');
+  logger.info(`Trocando authorization code (${code.slice(0, 12)}...) por tokens via ${getTokenUrl()}`);
 
-  const response = await axios.post(getTokenUrl(), {
+  const body = qs.stringify({
     client_id: config.kommo.clientId,
     client_secret: config.kommo.clientSecret,
     grant_type: 'authorization_code',
@@ -31,40 +35,41 @@ async function exchangeCode(code) {
     redirect_uri: config.kommo.redirectUri,
   });
 
+  const response = await axios.post(getTokenUrl(), body, { headers: FORM_HEADERS });
+
   const tokens = buildTokens(response.data);
   tokenStore.write(tokens);
+  logger.info('Tokens obtidos com sucesso!');
   return tokens;
 }
 
 /**
  * Renova o access token usando o refresh token.
- * Chamado automaticamente quando o token expira.
  */
 async function refreshAccessToken() {
   const current = tokenStore.getTokens();
   if (!current?.refresh_token) {
-    throw new Error(
-      'Nenhum refresh_token disponível. Execute "npm run setup" para autenticar.'
-    );
+    throw new Error('Nenhum refresh_token disponível. Acesse /auth/kommo para autenticar.');
   }
 
   logger.info('Renovando access token do Kommo...');
 
-  try {
-    const response = await axios.post(getTokenUrl(), {
-      client_id: config.kommo.clientId,
-      client_secret: config.kommo.clientSecret,
-      grant_type: 'refresh_token',
-      refresh_token: current.refresh_token,
-      redirect_uri: config.kommo.redirectUri,
-    });
+  const body = qs.stringify({
+    client_id: config.kommo.clientId,
+    client_secret: config.kommo.clientSecret,
+    grant_type: 'refresh_token',
+    refresh_token: current.refresh_token,
+    redirect_uri: config.kommo.redirectUri,
+  });
 
+  try {
+    const response = await axios.post(getTokenUrl(), body, { headers: FORM_HEADERS });
     const tokens = buildTokens(response.data);
     tokenStore.write(tokens);
     logger.info('Access token renovado com sucesso');
     return tokens;
   } catch (err) {
-    const msg = err.response?.data?.hint || err.message;
+    const msg = err.response?.data?.hint || err.response?.data?.message || err.message;
     logger.error('Falha ao renovar token:', msg);
     throw new Error(`Falha na renovação do token Kommo: ${msg}`);
   }
@@ -77,9 +82,7 @@ async function getValidToken() {
   let tokens = tokenStore.getTokens();
 
   if (!tokens?.access_token) {
-    throw new Error(
-      'Kommo não autenticado. Execute "npm run setup" para realizar o OAuth.'
-    );
+    throw new Error('Kommo não autenticado. Acesse /auth/kommo para autenticar.');
   }
 
   if (tokenStore.isExpired(tokens)) {
@@ -90,8 +93,8 @@ async function getValidToken() {
 }
 
 /**
- * Gera a URL de autorização OAuth para o setup inicial.
- * Usa mode=popup para fluxo server-side com redirect.
+ * Gera a URL de autorização OAuth.
+ * Auth SEMPRE usa www.kommo.com — NÃO o subdomínio.
  */
 function getAuthorizationUrl() {
   const params = new URLSearchParams({
@@ -100,7 +103,6 @@ function getAuthorizationUrl() {
     response_type: 'code',
     state: 'kommoblue_auth',
   });
-  // OAuth do Kommo SEMPRE usa www.kommo.com — não o subdomínio
   return `https://www.kommo.com/oauth?${params.toString()}`;
 }
 

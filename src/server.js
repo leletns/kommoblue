@@ -160,18 +160,40 @@ app.get('/auth/kommo/callback', async (req, res) => {
     `);
   } catch (err) {
     const detail = err.response?.data || err.message;
+    const status = err.response?.status;
     logger.error('Falha na troca do código OAuth:', JSON.stringify(detail));
+
+    // Gera comando curl para o usuário trocar o token manualmente se necessário
+    const curlCmd = `curl -X POST "https://${config.kommo.subdomain}.kommo.com/oauth2/access_token" \\
+  -H "Content-Type: application/x-www-form-urlencoded" \\
+  -d "client_id=${config.kommo.clientId}&client_secret=${config.kommo.clientSecret}&grant_type=authorization_code&code=${code}&redirect_uri=${encodeURIComponent(config.kommo.redirectUri)}"`;
+
     res.status(500).send(`
-      <h2>Erro ao autenticar</h2>
-      <p><b>Erro:</b> ${err.message}</p>
-      <h3>Resposta do Kommo:</h3>
-      <pre style="background:#fee;padding:10px">${JSON.stringify(detail, null, 2)}</pre>
-      <h3>Config enviada:</h3>
-      <pre style="background:#f0f0f0;padding:10px">${JSON.stringify({
-        client_id: config.kommo.clientId?.slice(0,8)+'...',
-        redirect_uri: config.kommo.redirectUri,
-        grant_type: 'authorization_code',
-      }, null, 2)}</pre>
+      <html><head><meta charset="utf-8"></head>
+      <body style="font-family:sans-serif;max-width:800px;margin:40px auto;padding:0 20px">
+        <h2>❌ Erro ${status || ''} ao autenticar</h2>
+        <p><b>Erro:</b> ${err.message}</p>
+
+        ${status === 403 ? `
+        <div style="background:#fef3c7;border:2px solid #f59e0b;padding:16px;border-radius:8px;margin:20px 0">
+          <h3 style="margin-top:0">⚠️ 403 Forbidden — IP do Railway bloqueado temporariamente</h3>
+          <p>O Kommo bloqueou temporariamente o servidor do Railway. Opções:</p>
+          <ol>
+            <li><b>Aguarda 30 min</b> e tenta novamente em <a href="/auth/kommo">/auth/kommo</a></li>
+            <li><b>Troca o token manualmente</b> rodando o curl abaixo no seu computador:</li>
+          </ol>
+          <p>Copia e cola no terminal do seu PC (PowerShell ou CMD):</p>
+          <textarea readonly style="width:100%;height:120px;font-size:11px;padding:8px;font-family:monospace;background:#111;color:#0f0;border-radius:6px">${curlCmd}</textarea>
+          <button onclick="document.querySelector('textarea').select();document.execCommand('copy')" style="margin-top:8px;background:#7c3aed;color:#fff;border:none;padding:10px 20px;border-radius:6px;cursor:pointer">📋 Copiar curl</button>
+          <p style="margin-top:16px;color:#666;font-size:13px">O curl vai retornar um JSON com access_token, refresh_token e expires_in. Cole esses valores no Railway.</p>
+        </div>
+        ` : ''}
+
+        <details>
+          <summary>Detalhes técnicos</summary>
+          <pre style="background:#fee;padding:10px">${JSON.stringify(detail, null, 2)}</pre>
+        </details>
+      </body></html>
     `);
   }
 });
