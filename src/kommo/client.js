@@ -156,7 +156,40 @@ async function getPipelinesWithStatuses() {
 // ─── CONTATOS ──────────────────────────────────────────────────────────────
 
 async function getContact(contactId) {
-  const res = await http.get(`/contacts/${contactId}`);
+  const res = await http.get(`/contacts/${contactId}`, {
+    params: { with: 'custom_fields_values' },
+  });
+  return res.data;
+}
+
+/**
+ * Atualiza dados do contato: nome, telefone, e-mail.
+ * @param {number} contactId
+ * @param {{ name?, phone?, email? }} data
+ */
+async function updateContact(contactId, { name, phone, email }) {
+  const payload = { id: contactId };
+
+  if (name) payload.name = name;
+
+  const customFieldsValues = [];
+  if (phone) {
+    customFieldsValues.push({
+      field_code: 'PHONE',
+      values: [{ value: phone, enum_code: 'WORK' }],
+    });
+  }
+  if (email) {
+    customFieldsValues.push({
+      field_code: 'EMAIL',
+      values: [{ value: email, enum_code: 'WORK' }],
+    });
+  }
+  if (customFieldsValues.length > 0) {
+    payload.custom_fields_values = customFieldsValues;
+  }
+
+  const res = await http.patch('/contacts', [payload]);
   return res.data;
 }
 
@@ -225,6 +258,20 @@ async function addTagsToLead(leadId, tagNames) {
   return res.data;
 }
 
+// ─── CAMPOS CUSTOMIZADOS ───────────────────────────────────────────────────
+
+/**
+ * Atualiza campos customizados de um lead.
+ * @param {number} leadId
+ * @param {Array<{field_code: string, values: Array}>} customFieldsValues
+ */
+async function updateLeadCustomFields(leadId, customFieldsValues) {
+  const res = await http.patch('/leads', [
+    { id: leadId, custom_fields_values: customFieldsValues },
+  ]);
+  return res.data;
+}
+
 module.exports = {
   http,
   getLead,
@@ -236,6 +283,8 @@ module.exports = {
   getPipelineStatuses,
   getPipelinesWithStatuses,
   getContact,
+  updateContact,
+  updateLeadCustomFields,
   getUsers,
   getTalk,
   getTalksByLead,

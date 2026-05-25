@@ -4,9 +4,10 @@
  * Carrega TODO o histórico de conversa de um lead:
  *   - Mensagens do WhatsApp Lite (via Talks)
  *   - Notas do lead (comentários, SMS, chamadas, etc.)
- *   - Eventos de mudança de pipeline
+ *   - Campos customizados (incluindo UTMs)
+ *   - Dados do contato principal
  *
- * Retorna um array ordenado por timestamp para o agente IA.
+ * Retorna contexto enriquecido e ordenado por timestamp para o agente IA.
  */
 
 const kommo = require('./client');
@@ -27,15 +28,13 @@ const NOTE_TYPE_LABELS = {
 
 /**
  * Carrega o contexto completo da conversa de um lead.
- * @param {number} leadId
- * @returns {{ lead, contact, pipeline, messages: Array, summary: string }}
  */
 async function loadConversationContext(leadId) {
   logger.info(`Carregando contexto completo do lead ${leadId}...`);
 
   // Busca paralela para economizar tempo
   const [lead, notes, talks] = await Promise.all([
-    kommo.getLead(leadId, { with: 'contacts,pipeline,loss_reason' }),
+    kommo.getLead(leadId, { with: 'contacts,pipeline,loss_reason,source_id,custom_fields_values' }),
     kommo.getLeadNotes(leadId),
     kommo.getTalksByLead(leadId).catch(() => []),
   ]);
@@ -49,7 +48,7 @@ async function loadConversationContext(leadId) {
     allTalkMsgs.forEach((msgs) => talkMessages.push(...msgs));
   }
 
-  // Busca contato principal
+  // Busca contato principal com campos customizados
   let contact = null;
   const contactId = lead._embedded?.contacts?.[0]?.id;
   if (contactId) {
@@ -66,7 +65,7 @@ async function loadConversationContext(leadId) {
     text: extractNoteText(note),
   }));
 
-  // Normaliza mensagens das talks
+  // Normaliza mensagens das talks (WhatsApp Lite)
   const normalizedTalkMsgs = talkMessages.map((msg) => ({
     id: `msg_${msg.id}`,
     timestamp: msg.created_at,
@@ -77,10 +76,23 @@ async function loadConversationContext(leadId) {
     media_type: msg.content?.type,
   }));
 
-  // Combina e ordena por timestamp
+  // Combina e ordena por timestamp — sem duplicatas
+  const seen = new Set();
   const allMessages = [...normalizedNotes, ...normalizedTalkMsgs]
+    .filter((m) => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    })
     .sort((a, b) => a.timestamp - b.timestamp)
-    .slice(-config.agent.maxContextMessages); // Limita ao máximo configurado
+    .slice(-config.agent.maxContextMessages);
+
+  // Extrai UTMs dos campos customizados do lead
+  const utms = extractUtms(lead);
+
+  // Extrai campos customizados relevantes do lead e contato
+  const customFields = extractCustomFields(lead);
+  const contactCustomFields = extractCustomFields(contact);
 
   // Monta resumo do lead
   const pipelineInfo = lead._embedded?.pipeline;
@@ -95,21 +107,30 @@ async function loadConversationContext(leadId) {
     current_status_id: lead.status_id,
     current_status_name: statusName,
     responsible_user_id: lead.responsible_user_id,
-    contact_name: contact?.name,
+    contact_id: contactId || null,
+    contact_name: contact?.name || null,
     contact_phone: extractPhone(contact),
     contact_email: extractEmail(contact),
     created_at: lead.created_at,
     updated_at: lead.updated_at,
     total_messages: allMessages.length,
     tags: lead._embedded?.tags?.map((t) => t.name) || [],
+    // UTMs e origem
+    utms,
+    lead_source: lead.source_id || null,
+    // Campos customizados já preenchidos
+    custom_fields: customFields,
+    contact_custom_fields: contactCustomFields,
   };
 
   logger.info(
-    `Contexto carregado: ${allMessages.length} msgs, pipeline "${summary.pipeline_name}", etapa "${summary.current_status_name}"`
+    `Contexto carregado: ${allMessages.length} msgs | pipeline "${summary.pipeline_name}" | etapa "${summary.current_status_name}" | UTMs: ${JSON.stringify(utms)}`
   );
 
   return { lead, contact, summary, messages: allMessages };
 }
+
+// ─── Extratores auxiliares ────────────────────────────────────────────────────
 
 function extractNoteText(note) {
   if (note.params?.text) return note.params.text;
@@ -120,18 +141,61 @@ function extractNoteText(note) {
 
 function extractPhone(contact) {
   if (!contact) return null;
-  const phones = contact.custom_fields_values?.find(
-    (f) => f.field_code === 'PHONE'
-  );
-  return phones?.values?.[0]?.value || null;
+  const field = contact.custom_fields_values?.find((f) => f.field_code === 'PHONE');
+  return field?.values?.[0]?.value || null;
 }
 
 function extractEmail(contact) {
   if (!contact) return null;
-  const emails = contact.custom_fields_values?.find(
-    (f) => f.field_code === 'EMAIL'
-  );
-  return emails?.values?.[0]?.value || null;
+  const field = contact.custom_fields_values?.find((f) => f.field_code === 'EMAIL');
+  return field?.values?.[0]?.value || null;
+}
+
+/**
+ * Extrai UTMs dos campos customizados do lead.
+ * Kommo armazena UTMs com field_code = UTM_SOURCE, UTM_MEDIUM, etc.
+ */
+function extractUtms(lead) {
+  const fields = lead?.custom_fields_values || [];
+  const utmMap = {};
+
+  const utmCodes = ['UTM_SOURCE', 'UTM_MEDIUM', 'UTM_CAMPAIGN', 'UTM_TERM', 'UTM_CONTENT'];
+
+  for (const field of fields) {
+    const code = (field.field_code || '').toUpperCase();
+    const name = (field.field_name || '').toUpperCase().replace(/\s/g, '_');
+
+    // Busca por field_code exato ou por nome do campo
+    if (utmCodes.includes(code) || utmCodes.includes(name)) {
+      const key = utmCodes.find((u) => u === code || u === name);
+      if (key) utmMap[key.toLowerCase()] = field.values?.[0]?.value || null;
+    }
+  }
+
+  return {
+    source: utmMap.utm_source || null,
+    medium: utmMap.utm_medium || null,
+    campaign: utmMap.utm_campaign || null,
+    term: utmMap.utm_term || null,
+    content: utmMap.utm_content || null,
+  };
+}
+
+/**
+ * Extrai campos customizados relevantes de um objeto Kommo (lead ou contato).
+ * Retorna array simplificado { code, name, value }.
+ */
+function extractCustomFields(entity) {
+  if (!entity?.custom_fields_values) return [];
+
+  return entity.custom_fields_values
+    .map((f) => ({
+      id: f.field_id,
+      code: f.field_code || null,
+      name: f.field_name,
+      value: f.values?.[0]?.value ?? null,
+    }))
+    .filter((f) => f.value !== null && f.value !== '');
 }
 
 module.exports = { loadConversationContext };
