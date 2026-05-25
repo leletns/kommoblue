@@ -314,6 +314,11 @@ app.post('/scan', async (req, res) => {
   res.json(result);
 });
 
+app.post('/scan/stop', (req, res) => {
+  const { stopScan } = require('./processors/bulk-scan');
+  res.json(stopScan());
+});
+
 app.get('/scan/status', (req, res) => {
   const { getScanStatus } = require('./processors/bulk-scan');
   res.json(getScanStatus());
@@ -343,6 +348,7 @@ app.get('/scan', (req, res) => {
 
       <button class="btn" onclick="startScan(false)">▶ Varrer TODOS os leads</button>
       <button class="btn btn-sec" onclick="startScan(true)">▶ Varrer apenas ativos</button>
+      <button class="btn" style="background:#dc2626;margin-top:8px" onclick="stopScan()">⏹ Parar varredura</button>
 
       <div id="stats" style="margin-top:20px"></div>
       <div class="progress"><div class="progress-bar" id="bar" style="width:0%">0%</div></div>
@@ -355,6 +361,12 @@ app.get('/scan', (req, res) => {
           await fetch('/scan?only_active='+onlyActive, {method:'POST'});
           clearInterval(interval);
           interval = setInterval(updateStatus, 2000);
+          updateStatus();
+        }
+        async function stopScan() {
+          if(!confirm('Parar a varredura?')) return;
+          await fetch('/scan/stop', {method:'POST'});
+          clearInterval(interval);
           updateStatus();
         }
         async function updateStatus() {
