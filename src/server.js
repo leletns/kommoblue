@@ -167,6 +167,20 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Debug — mostra o que o servidor está lendo das variáveis
+app.get('/debug-env', (req, res) => {
+  const at = process.env.KOMMO_ACCESS_TOKEN;
+  const rt = process.env.KOMMO_REFRESH_TOKEN;
+  const exp = process.env.KOMMO_TOKEN_EXPIRES_AT;
+  res.json({
+    KOMMO_ACCESS_TOKEN: at ? `SET (${at.length} chars, starts: ${at.slice(0,12)}...)` : 'NÃO DEFINIDO',
+    KOMMO_REFRESH_TOKEN: rt ? `SET (${rt.length} chars)` : 'NÃO DEFINIDO',
+    KOMMO_TOKEN_EXPIRES_AT: exp || 'NÃO DEFINIDO',
+    KOMMO_SUBDOMAIN: process.env.KOMMO_SUBDOMAIN || 'NÃO DEFINIDO',
+    KOMMO_CLIENT_ID: process.env.KOMMO_CLIENT_ID ? 'SET' : 'NÃO DEFINIDO',
+  });
+});
+
 app.get('/status', async (req, res) => {
   const tokenStore = require('./utils/token-store');
   const tokens = tokenStore.getTokens();
