@@ -165,6 +165,7 @@ function parseDecision(rawText, summary) {
       suggested_action: parsed.suggested_action || '',
       reply_message: parsed.reply_message || null,
       task_to_create: parsed.task_to_create || null,
+      appointment: parsed.appointment || null,
     };
   } catch (err) {
     logger.error('Falha ao parsear JSON da IA:', err.message);

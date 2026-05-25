@@ -434,6 +434,17 @@ function buildRichNote(decision, summary) {
     if (parts.length > 0) note += `📊 ${parts.join(' | ')}\n`;
   }
 
+  // Agendamento detectado
+  if (decision.appointment) {
+    const appt = decision.appointment;
+    note += `\n📅 CONSULTA MARCADA: ${appt.date || '?'}${appt.time ? ' às ' + appt.time : ''} — ${appt.procedure || 'procedimento'}\n`;
+  }
+
+  // Tarefa criada
+  if (decision.task_to_create) {
+    note += `\n✅ Tarefa: ${decision.task_to_create.text}\n`;
+  }
+
   // Próximo passo
   if (decision.suggested_action) {
     note += `\n💡 ${decision.suggested_action}`;

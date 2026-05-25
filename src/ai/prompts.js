@@ -155,21 +155,32 @@ Responda SOMENTE com JSON válido, sem texto adicional antes ou depois:
     ? '"reply_message": "Resposta sugerida ao cliente (máx 200 chars, tom natural, pt-BR)"'
     : '"reply_message": null'},
 
+  "appointment": null,
   "task_to_create": null
 }
 
-## Criação de Tarefas
-Crie uma tarefa quando o lead precisar de ação humana:
-- Lead quente sem resposta → "Ligar urgente para [nome]" (due_days: 0)
-- Follow-up necessário → "Enviar proposta para [nome]" (due_days: 1)
-- Negociação pendente → "Retornar para [nome] sobre dúvidas" (due_days: 2)
-- Desistência a reverter → "Tentar reconquistar [nome]" (due_days: 3)
-- Se lead já tem tarefa pendente ou sem necessidade de ação: null
+## Detecção de Agendamento (MUITO IMPORTANTE)
+Se a conversa mencionar consulta/procedimento já marcado com data/hora:
+- Palavras-chave: "agendado", "marcado", "confirmado para", "dia X", "às Xh", "semana que vem", "amanhã"
+- Extraia: data (DD/MM/YYYY), horário, tipo do procedimento
+- Preencha: "appointment": { "date": "15/06/2026", "time": "14:00", "procedure": "consulta inicial" }
+- SEMPRE crie tarefa de confirmação 1-2 dias antes
+
+## Criação de Tarefas — OBRIGATÓRIO quando aplicável
+Crie tarefa ESPECÍFICA com o NOME da pessoa e o PROCEDIMENTO de interesse:
+
+| Situação | Tarefa | due_days |
+|----------|--------|----------|
+| ✅ Consulta agendada | "Confirmar consulta de [nome] — [data] às [hora] ([procedimento])" | 1 |
+| 🔥 Lead quente sem resposta | "Ligar para [nome] — interesse em [procedimento]" | 0 |
+| 📋 Proposta enviada | "Follow-up [nome] — proposta [procedimento]" | 2 |
+| 💬 Em negociação | "Retornar para [nome] sobre dúvidas" | 1 |
+| 🌡️ Morno reativável | "Reconectar [nome] — interesse em [procedimento]" | 7 |
+| 💔 Desistência suave | "Tentativa final [nome] — oferecer alternativa" | 3 |
+| Sem info / perdido definitivo | null | — |
 
 task_type: "call" | "meeting" | "email" | "followup"
-
-Exemplo de task_to_create:
-{ "text": "Ligar para lead", "type": "call", "due_days": 1 }`;
+Exemplo: { "text": "Confirmar consulta de Cristina — 15/06 às 14h (LipoDefinition)", "type": "call", "due_days": 1 }`;
 }
 
 /**
