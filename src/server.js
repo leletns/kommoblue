@@ -121,13 +121,26 @@ app.get('/auth/kommo/callback', async (req, res) => {
     logger.info('OAuth Kommo concluído com sucesso!');
 
     res.send(`
-      <html><body style="font-family:sans-serif;max-width:600px;margin:50px auto">
+      <html><body style="font-family:sans-serif;max-width:680px;margin:40px auto">
         <h1>✅ Kommo conectado!</h1>
-        <p>Tokens salvos com sucesso. O agente IA está ativo.</p>
-        <p>Você pode fechar esta janela.</p>
-        <pre style="background:#f0f0f0;padding:10px">
-Access token expira em: ${new Date(tokens.expires_at * 1000).toLocaleString('pt-BR')}
-        </pre>
+        <p>Token expira em: <b>${new Date(tokens.expires_at * 1000).toLocaleString('pt-BR')}</b></p>
+
+        <div style="background:#fff3cd;border:1px solid #ffc107;padding:16px;border-radius:8px;margin:20px 0">
+          <h3 style="margin-top:0">⚠️ IMPORTANTE — Salve os tokens no Railway</h3>
+          <p>Copie os 3 valores abaixo e cole nas <b>Variables do Railway</b> para não perder após reinício:</p>
+        </div>
+
+        <h3>KOMMO_ACCESS_TOKEN</h3>
+        <textarea style="width:100%;height:80px;font-size:11px;padding:8px">${tokens.access_token}</textarea>
+
+        <h3>KOMMO_REFRESH_TOKEN</h3>
+        <textarea style="width:100%;height:80px;font-size:11px;padding:8px">${tokens.refresh_token}</textarea>
+
+        <h3>KOMMO_TOKEN_EXPIRES_AT</h3>
+        <input style="width:100%;padding:8px;font-size:13px" value="${tokens.expires_at}" readonly>
+
+        <br><br>
+        <p style="color:green">✅ O agente IA já está ativo e processando mensagens!</p>
       </body></html>
     `);
   } catch (err) {
