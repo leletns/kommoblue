@@ -182,6 +182,49 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Debug — testa conexão real com a API Kommo
+app.get('/debug-api', async (req, res) => {
+  const kommoClient = require('./kommo/client');
+  const tokenStore = require('./utils/token-store');
+  const results = {};
+
+  results.baseUrl = config.kommo.baseUrl;
+  results.subdomain = config.kommo.subdomain;
+
+  const tokens = tokenStore.getTokens();
+  results.tokenPresent = !!tokens?.access_token;
+  results.tokenPreview = tokens?.access_token ? tokens.access_token.slice(0, 20) + '...' : 'none';
+
+  // Testa /leads (primeiro lead)
+  try {
+    const { http } = kommoClient;
+    const r = await http.get('/leads', { params: { limit: 1 } });
+    results.leads_test = { status: r.status, total: r.data?.['_page_count'], sample: r.data?._embedded?.leads?.length || 0 };
+  } catch (err) {
+    results.leads_test = { error: err.message, status: err.response?.status, body: err.response?.data };
+  }
+
+  // Testa /leads/pipelines
+  try {
+    const { http } = kommoClient;
+    const r = await http.get('/leads/pipelines', { params: { limit: 10 } });
+    results.pipelines_test = { status: r.status, count: r.data?._embedded?.pipelines?.length || 0 };
+  } catch (err) {
+    results.pipelines_test = { error: err.message, status: err.response?.status, body: err.response?.data };
+  }
+
+  // Testa /account
+  try {
+    const { http } = kommoClient;
+    const r = await http.get('/account');
+    results.account_test = { status: r.status, name: r.data?.name, subdomain: r.data?.subdomain };
+  } catch (err) {
+    results.account_test = { error: err.message, status: err.response?.status };
+  }
+
+  res.json(results);
+});
+
 // Debug — mostra o que o servidor está lendo das variáveis
 app.get('/debug-env', (req, res) => {
   const at = process.env.KOMMO_ACCESS_TOKEN;

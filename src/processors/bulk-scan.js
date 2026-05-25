@@ -111,7 +111,16 @@ async function startBulkScan({ onlyActive = false, delayMs = 2000 } = {}) {
 async function runScan({ onlyActive, delayMs }) {
   try {
     // 1. Busca todos os pipelines e suas etapas
-    const pipelines = await kommo.getPipelinesWithStatuses();
+    addLog('info', 'Carregando pipelines do Kommo...');
+    let pipelines;
+    try {
+      pipelines = await kommo.getPipelinesWithStatuses();
+      addLog('info', `${pipelines.length} pipeline(s) carregado(s): ${pipelines.map(p => p.name).join(', ')}`);
+    } catch (err) {
+      addLog('error', `ERRO ao carregar pipelines: ${err.message} (status: ${err.response?.status || 'sem status'})`);
+      logger.error('[BulkScan] Falha ao carregar pipelines:', err.message);
+      throw err;
+    }
 
     // Mapeia status WON e LOST por pipeline
     const wonStatusMap = {};
@@ -124,14 +133,21 @@ async function runScan({ onlyActive, delayMs }) {
     }
 
     // 2. Busca TODOS os leads
-    const params = { limit: 250 };
+    const params = {};
     if (onlyActive) {
       // Filtra apenas leads não finalizados (não WON nem LOST)
       params.filter = { statuses: [{ pipeline_id: 0, status_id: 0 }] };
     }
 
     addLog('info', `Buscando todos os leads...`);
-    const allLeads = await kommo.fetchAllPages('/leads', params);
+    let allLeads;
+    try {
+      allLeads = await kommo.fetchAllPages('/leads', params);
+    } catch (err) {
+      addLog('error', `ERRO ao buscar leads: ${err.message} (status: ${err.response?.status || 'sem status'})`);
+      logger.error('[BulkScan] Falha ao buscar leads:', err.message);
+      throw err;
+    }
     scanState.total = allLeads.length;
 
     addLog('info', `Total de leads encontrados: ${allLeads.length}`);

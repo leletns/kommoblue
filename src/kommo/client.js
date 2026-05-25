@@ -67,12 +67,25 @@ async function fetchAllPages(endpoint, params = {}) {
   let page = 1;
 
   while (true) {
-    const response = await http.get(endpoint, {
-      params: { ...params, page, limit: 250 },
-    });
+    let response;
+    try {
+      response = await http.get(endpoint, {
+        params: { ...params, page, limit: 250 },
+      });
+    } catch (err) {
+      const status = err.response?.status;
+      const baseUrl = config.kommo.baseUrl;
+      const detail = JSON.stringify(err.response?.data || err.message);
+      logger.error(`[fetchAllPages] Erro ${status} em ${baseUrl}${endpoint} (página ${page}): ${detail}`);
+      throw err; // propaga para o caller tratar
+    }
 
     const embedded = response.data?._embedded;
-    if (!embedded) break;
+    if (!embedded) {
+      // 204 No Content ou resposta sem _embedded = lista vazia (não é erro)
+      logger.debug(`[fetchAllPages] ${endpoint} página ${page}: sem _embedded, encerrando`);
+      break;
+    }
 
     const items = Object.values(embedded)[0];
     if (!Array.isArray(items) || items.length === 0) break;
@@ -118,11 +131,12 @@ async function addLeadNote(leadId, { text, noteType = 'common', params: notePara
 // ─── PIPELINES ─────────────────────────────────────────────────────────────
 
 async function getPipelines() {
-  return fetchAllPages('/pipelines');
+  // Kommo API v4: pipelines ficam em /leads/pipelines (não /pipelines)
+  return fetchAllPages('/leads/pipelines');
 }
 
 async function getPipelineStatuses(pipelineId) {
-  const res = await http.get(`/pipelines/${pipelineId}/statuses`);
+  const res = await http.get(`/leads/pipelines/${pipelineId}/statuses`);
   const statuses = res.data?._embedded?.statuses || {};
   return Object.values(statuses);
 }
