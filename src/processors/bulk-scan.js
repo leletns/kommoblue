@@ -69,7 +69,7 @@ function stopScan() {
 /**
  * Inicia a varredura completa em background.
  */
-async function startBulkScan({ onlyActive = false, delayMs = 2000 } = {}) {
+async function startBulkScan({ onlyActive = false, delayMs = 3500 } = {}) {
   if (scanState.running) return { error: 'Varredura já em andamento' };
 
   Object.assign(scanState, {
@@ -153,12 +153,24 @@ async function runScan({ onlyActive, delayMs }) {
 
       scanState.currentLead = { id: lead.id, name: lead.name };
 
-      try {
-        await processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines);
-      } catch (err) {
-        scanState.errors++;
-        addLog('error', `Lead ${lead.id} (${lead.name || 'sem nome'}): ${err.message}`);
-        logger.error(`[BulkScan] Lead ${lead.id}:`, err.message);
+      let retries = 0;
+      while (retries <= 2) {
+        try {
+          await processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines);
+          break;
+        } catch (err) {
+          if (err.response?.status === 429 && retries < 2) {
+            retries++;
+            const wait = 10000 * retries; // 10s, 20s
+            addLog('info', `Rate limit (429) — aguardando ${wait/1000}s antes de tentar lead ${lead.id} novamente...`);
+            await sleep(wait);
+          } else {
+            scanState.errors++;
+            addLog('error', `Lead ${lead.id} (${lead.name || 'sem nome'}): ${err.message}`);
+            logger.error(`[BulkScan] Lead ${lead.id}:`, err.message);
+            break;
+          }
+        }
       }
 
       scanState.processed++;
