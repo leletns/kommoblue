@@ -251,20 +251,30 @@ async function getTalksByLead(leadId) {
 
 /**
  * Busca mensagens de uma talk.
- * ATENÇÃO: endpoint específico do WhatsApp Lite no Kommo.
+ * ATENÇÃO: requer permissão "chats" na integração Kommo.
+ * Se retornar 403, vá em Kommo → Integrações → sua integração → habilitar permissão Chats.
  */
 async function getTalkMessages(talkId, limit = 100) {
+  // Tenta /talks/{id}/messages
   try {
     const res = await http.get(`/talks/${talkId}/messages`, {
       params: { limit },
     });
     return res.data?._embedded?.messages || [];
   } catch (err) {
-    if (err.response?.status === 404) {
-      logger.warn(`Talk ${talkId} não possui endpoint de mensagens. Usando notas do lead.`);
+    if (err.response?.status === 403) {
+      logger.warn(
+        `Talk ${talkId}: 403 em /messages — integração sem permissão "chats". ` +
+        'Vá em Kommo → Integrações → habilitar permissão Chats e re-autentique em /auth/kommo'
+      );
       return [];
     }
-    throw err;
+    if (err.response?.status === 404) {
+      return [];
+    }
+    // Não propaga erro de talks — continua com o que temos
+    logger.warn(`Talk ${talkId}: erro ao buscar mensagens (${err.response?.status})`);
+    return [];
   }
 }
 

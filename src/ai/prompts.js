@@ -258,6 +258,10 @@ ${contactCustomStr}
 ${utmStr}
 
 ## Histórico completo da conversa (${summary.total_messages} mensagens)
+ATENÇÃO: O histórico pode incluir notas automáticas de outras integrações (ex: Growth Blue OS, SalesBot).
+Essas notas são análises anteriores do lead — use como contexto adicional, mas priorize mensagens reais do cliente.
+Mensagens do tipo "nota" ou "nota_X" são notas internas do CRM, não mensagens diretas do WhatsApp.
+
 ${historyStr}
 ${newMsgStr}
 

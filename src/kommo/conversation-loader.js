@@ -27,19 +27,17 @@ const NOTE_TYPE_LABELS = {
 };
 
 /**
- * Detecta se uma nota foi gerada por um bot de IA (para filtrar do contexto).
+ * Detecta se uma nota foi gerada pelo NOSSO PRÓPRIO agente (evita análise circular).
+ * Mantém notas de outras integrações (Growth Blue OS, etc.) pois contêm contexto real.
  */
 function isAiNote(note) {
   const text = note.params?.text || note.text || '';
   return (
-    text.includes('[IA]') ||
-    text.includes('IA|') ||
-    text.includes('[AI]') ||
-    text.includes('[IA - Varredura]') ||
-    text.includes('AGENTE IA') ||
-    (text.includes('Score:') && text.includes('/100')) ||
-    text.includes('Growth Blue') ||
-    text.includes('Análise interna gerada por IA')
+    text.startsWith('[IA - Varredura]') ||
+    text.startsWith('[IA]') ||
+    text.includes('Kommo Blue') ||
+    text.includes('Agente IA —') ||
+    text.includes('CONSULTA GANHA detectada automaticamente')
   );
 }
 

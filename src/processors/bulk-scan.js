@@ -49,42 +49,21 @@ const DATA_PATTERNS = [
 ];
 
 /**
- * Detecta se uma nota foi gerada por bot/IA — deve ser ignorada.
- * Inclui Growth Blue OS, nosso próprio agente, SalesBot, etc.
- *
- * IMPORTANTE: Não use checagens muito amplas (ex: "score:" sozinho) pois
- * filtrariam mensagens reais de clientes.
+ * Detecta se uma nota é do NOSSO PRÓPRIO agente — deve ser ignorada para evitar
+ * análise circular. NÃO filtra notas de outras integrações (Growth Blue OS, etc.)
+ * pois essas contêm contexto real da conversa que o nosso agente pode usar.
  */
-function isAiBotNote(note) {
+function isOurOwnNote(note) {
   const text = (note.params?.text || note.text || '').toLowerCase();
-
-  // Marcadores explícitos de bot/IA
-  if (
-    text.startsWith('[ia]') ||
-    text.startsWith('[ai]') ||
+  return (
     text.startsWith('[ia - varredura]') ||
-    text.startsWith('ia|') ||
-    text.includes('growth blue') ||
-    text.includes('análise interna gerada por ia') ||
-    text.includes('salesbot:') ||
-    text.includes('assim pode avaliar') ||
-    text.includes('[ia - varredura]') ||
+    text.startsWith('[ia]') ||
+    text.includes('kommo blue') ||
     text.includes('agente ia —') ||
-    text.includes('kommo blue')
-  ) {
-    return true;
-  }
-
-  // Padrão específico do Growth Blue OS: "Score: X/100" + termos de qualificação
-  // (não filtra se o cliente mencionar "score" em outro contexto)
-  if (/score:\s*\d+\/100/i.test(text) && (
-    text.includes('quente') || text.includes('morno') || text.includes('frio') ||
-    text.includes('bant:') || text.includes('qualificação') || text.includes('urgência:')
-  )) {
-    return true;
-  }
-
-  return false;
+    // Notas geradas por nós na varredura anterior
+    text.includes('ia - varredura') ||
+    text.includes('consulta ganha detectada automaticamente')
+  );
 }
 
 function detectPaymentAndData(messages) {
@@ -284,9 +263,11 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines) {
     logger.warn(`[BulkScan] Lead ${leadId}: erro ao buscar talks (${err.response?.status})`);
   }
 
-  // Normaliza notas — FILTRA notas de IA/bots antes de mandar pro Claude
+  // Normaliza notas — remove APENAS as nossas próprias notas de varredura
+  // (para evitar análise circular). Mantém Growth Blue OS e outras integrações
+  // pois contêm contexto real da conversa que o Claude pode usar.
   const normalizedNotes = notes
-    .filter((n) => !isAiBotNote(n))           // remove notas do Growth Blue OS, [IA], etc.
+    .filter((n) => !isOurOwnNote(n))          // remove SOMENTE nossas notas [IA - Varredura]
     .filter((n) => n.params?.text || n.text)  // deve ter texto real
     .map((n) => ({
       id: `note_${n.id}`,
@@ -309,8 +290,8 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines) {
 
   // Log diagnóstico: mostra o que veio da API antes e depois do filtro
   const rawNoteTypes = [...new Set(notes.map((n) => n.note_type))].join(',') || 'nenhum';
-  const filteredBotCount = notes.filter((n) => isAiBotNote(n)).length;
-  const noTextCount = notes.filter((n) => !isAiBotNote(n) && !n.params?.text && !n.text).length;
+  const filteredBotCount = notes.filter((n) => isOurOwnNote(n)).length;
+  const noTextCount = notes.filter((n) => !isOurOwnNote(n) && !n.params?.text && !n.text).length;
   logger.info(
     `[BulkScan] Lead ${leadId}: ${notes.length} notas (tipos: ${rawNoteTypes}), ` +
     `${filteredBotCount} bot-filtradas, ${noTextCount} sem texto, ` +
@@ -324,11 +305,12 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines) {
     .slice(-config.agent.maxContextMessages);
 
   if (messages.length === 0) {
-    // Sem mensagens reais — avisa no log com diagnóstico detalhado
-    const reason = notes.length === 0 ? 'sem notas na API' :
-      filteredBotCount === notes.length ? `${filteredBotCount} notas de bot filtradas` :
-      'notas sem texto';
-    addLog('skip', `Lead ${leadId} (${lead.name || 'sem nome'}): sem conversa (${reason}) — pulando`);
+    const reason = notes.length === 0
+      ? 'sem notas na API (talks precisam de permissão chats no Kommo)'
+      : filteredBotCount === notes.length
+      ? `${filteredBotCount} notas eram apenas nossas`
+      : 'notas sem texto';
+    addLog('skip', `Lead ${leadId} (${lead.name || 'sem nome'}): sem dados de conversa (${reason}) — pulando`);
     scanState.skipped++;
     return;
   }
