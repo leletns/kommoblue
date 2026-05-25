@@ -120,27 +120,42 @@ app.get('/auth/kommo/callback', async (req, res) => {
     const tokens = await auth.exchangeCode(code);
     logger.info('OAuth Kommo concluído com sucesso!');
 
+    const envBlock = `KOMMO_ACCESS_TOKEN="${tokens.access_token}"\nKOMMO_REFRESH_TOKEN="${tokens.refresh_token}"\nKOMMO_TOKEN_EXPIRES_AT="${tokens.expires_at}"`;
+
     res.send(`
-      <html><body style="font-family:sans-serif;max-width:680px;margin:40px auto">
+      <html><head><meta charset="utf-8"></head>
+      <body style="font-family:sans-serif;max-width:720px;margin:40px auto;padding:0 20px">
         <h1>✅ Kommo conectado!</h1>
         <p>Token expira em: <b>${new Date(tokens.expires_at * 1000).toLocaleString('pt-BR')}</b></p>
 
-        <div style="background:#fff3cd;border:1px solid #ffc107;padding:16px;border-radius:8px;margin:20px 0">
-          <h3 style="margin-top:0">⚠️ IMPORTANTE — Salve os tokens no Railway</h3>
-          <p>Copie os 3 valores abaixo e cole nas <b>Variables do Railway</b> para não perder após reinício:</p>
+        <div style="background:#fff3cd;border:2px solid #f59e0b;padding:16px;border-radius:8px;margin:20px 0">
+          <h3 style="margin-top:0">⚠️ Cole isso no Raw Editor do Railway</h3>
+          <p>1. No Railway → Variables → <b>Raw Editor</b><br>
+             2. Seleciona tudo (Ctrl+A) e apaga<br>
+             3. Cola o bloco abaixo<br>
+             4. Clica <b>Update Variables</b></p>
         </div>
 
-        <h3>KOMMO_ACCESS_TOKEN</h3>
-        <textarea style="width:100%;height:80px;font-size:11px;padding:8px">${tokens.access_token}</textarea>
+        <p><b>Clica no botão para copiar tudo de uma vez:</b></p>
+        <button onclick="copyAll()" style="background:#7c3aed;color:#fff;border:none;padding:12px 24px;border-radius:8px;font-size:16px;cursor:pointer;margin-bottom:12px">
+          📋 Copiar tokens para o Railway
+        </button>
+        <span id="ok" style="color:green;display:none;margin-left:10px">✅ Copiado!</span>
 
-        <h3>KOMMO_REFRESH_TOKEN</h3>
-        <textarea style="width:100%;height:80px;font-size:11px;padding:8px">${tokens.refresh_token}</textarea>
+        <textarea id="envblock" readonly style="width:100%;height:120px;font-size:11px;padding:12px;font-family:monospace;white-space:nowrap;overflow-x:auto;background:#111;color:#0f0;border-radius:8px">${envBlock}</textarea>
 
-        <h3>KOMMO_TOKEN_EXPIRES_AT</h3>
-        <input style="width:100%;padding:8px;font-size:13px" value="${tokens.expires_at}" readonly>
+        <p style="color:#666;font-size:13px">⚠️ Esses são apenas os 3 tokens novos. No Raw Editor do Railway, mantenha todas as outras variáveis que já estão lá e apenas substitua/adicione essas 3 linhas.</p>
 
-        <br><br>
-        <p style="color:green">✅ O agente IA já está ativo e processando mensagens!</p>
+        <p style="color:green;margin-top:20px">✅ O agente IA já está ativo!</p>
+
+        <script>
+          function copyAll() {
+            const t = document.getElementById('envblock');
+            t.select();
+            document.execCommand('copy');
+            document.getElementById('ok').style.display='inline';
+          }
+        </script>
       </body></html>
     `);
   } catch (err) {
