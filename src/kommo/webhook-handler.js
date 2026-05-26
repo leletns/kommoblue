@@ -73,22 +73,31 @@ function extractEvents(body) {
   const events = [];
 
   // ── WhatsApp Lite formato 1: message.add ──────────────────────────────────
-  // Disparado quando uma mensagem chega/é enviada via WhatsApp Lite
+  // Formato real confirmado: { entity_id, element_id, text, type:"incoming", author:{type:"external"} }
   if (body.message?.add) {
     for (const msg of body.message.add) {
-      if (!msg.entity_id) continue;
+      const leadId = msg.entity_id || msg.element_id;
+      if (!leadId) continue;
+
+      // Só processa mensagens INBOUND do cliente
+      const isInbound = msg.type === 'incoming' ||
+                        msg.author?.type === 'external' ||
+                        (!msg.author_id || msg.author_id === '0' || msg.author_id === 0);
+      if (!isInbound) continue;
+
       const text = msg.text || msg.content || msg.message || '';
-      const isInbound = !msg.author_id || msg.author_id === 0 || msg.direction === 'in';
-      if (!isInbound) continue; // só processa mensagens DO CLIENTE
+      if (!text.trim()) continue; // ignora mensagens sem texto (mídia sem legenda)
 
       events.push({
         type: 'message',
-        leadId: parseInt(msg.entity_id, 10),
+        leadId: parseInt(leadId, 10),
         message: {
           id: msg.id,
           text,
-          created_at: msg.created_at || Math.floor(Date.now() / 1000),
+          created_at: msg.created_at ? parseInt(msg.created_at, 10) : Math.floor(Date.now() / 1000),
           direction: 'inbound',
+          chat_id: msg.chat_id,
+          talk_id: msg.talk_id,
         },
       });
     }
