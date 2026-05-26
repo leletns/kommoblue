@@ -357,6 +357,32 @@ app.get('/debug-lead/:id', async (req, res) => {
     result.notes_error = { status: err.response?.status, message: err.message };
   }
 
+  // Notas do CONTATO (WhatsApp pode estar linkado ao contato, não ao lead)
+  try {
+    const leadRes = await http.get('/leads', {
+      params: { 'filter[id]': leadId, with: 'contacts', limit: 1 },
+    });
+    const contactId = leadRes.data?._embedded?.leads?.[0]?._embedded?.contacts?.[0]?.id;
+    result.contact_id = contactId || null;
+
+    if (contactId) {
+      const cNotesRes = await http.get(`/contacts/${contactId}/notes`, { params: { limit: 50 } });
+      const cNotes = cNotesRes.data?._embedded?.notes || [];
+      result.contact_notes_count = cNotes.length;
+      result.contact_note_types = [...new Set(cNotes.map((n) => n.note_type))];
+      result.contact_notes_sample = cNotes.slice(0, 10).map((n) => ({
+        id: n.id,
+        note_type: n.note_type,
+        created_by: n.created_by,
+        created_at: new Date(n.created_at * 1000).toLocaleString('pt-BR'),
+        text_preview: (n.params?.text || n.text || '').slice(0, 150),
+        params_keys: Object.keys(n.params || {}),
+      }));
+    }
+  } catch (err) {
+    result.contact_notes_error = { status: err.response?.status, message: err.message };
+  }
+
   // Talks via filter[entity_id]
   try {
     const talksRes = await http.get('/talks', {
