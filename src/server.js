@@ -60,6 +60,11 @@ function verifyWebhookSignature(req) {
 // Armazena últimos webhooks recebidos para debug
 const recentWebhooks = [];
 
+// GET para confirmar que o webhook está ativo (browser test)
+app.get('/webhook/kommo', (req, res) => {
+  res.json({ status: 'ok', message: 'Webhook ativo — aguardando POST do Kommo', url: req.originalUrl });
+});
+
 app.post('/webhook/kommo', async (req, res) => {
   // Salva payload para debug (últimos 5)
   recentWebhooks.unshift({ time: new Date().toLocaleTimeString('pt-BR'), body: req.body });
