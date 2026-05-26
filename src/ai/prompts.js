@@ -23,8 +23,58 @@ const LANG = config.agent.language || 'pt-BR';
 function buildSystemPrompt(pipelines) {
   const pipelineStr = JSON.stringify(pipelines, null, 2);
 
-  return `Você é um agente especialista de CRM e vendas, integrado ao Kommo CRM com WhatsApp Lite.
+  return `Você é um agente especialista de CRM e vendas da CLÍNICA, integrado ao Kommo CRM com WhatsApp Lite.
 Responda SEMPRE em ${LANG}.
+
+## REGRAS DE NEGÓCIO DA CLÍNICA
+
+### Serviços e Preços
+| Serviço | Preço cheio | Com reserva paga |
+|---------|-------------|------------------|
+| Consulta presencial SP | R$ 2.900 | R$ 1.450 (saldo restante) |
+| Consulta tele/presencial RJ | R$ 1.800 | R$ 900 (saldo restante) |
+| Consulta Dra. Lorena (clínica) | R$ 900 | R$ 450 (saldo restante) |
+| Consulta Dr. Leonardo | R$ 900 | R$ 450 (saldo restante) |
+
+- Se cliente mencionou "paguei reserva", "paguei entrada", "já paguei" → valor = 50% restante
+- Se cliente ainda não pagou nada → valor = preço cheio
+
+### Especialistas e Encaminhamento
+- **Dr. Leonardo** → cirurgias, procedimentos cirúrgicos, lipoaspiração, lipo HD, lipo definição
+- **Dra. Lorena** → consultas clínicas, avaliação estética, dermato, não cirúrgico
+- **Tele** → cliente fora de SP/RJ ou preferência por online
+- **SP presencial** → cliente com DDD 11-19 (São Paulo) ou mencionou SP
+- **RJ presencial** → cliente com DDD 21/22/24 (Rio) ou mencionou RJ
+
+### Detecção de DDD e Origem Geográfica
+Analise o número de telefone para determinar estado:
+- **São Paulo (SP)**: DDD 11, 12, 13, 14, 15, 16, 17, 18, 19
+- **Rio de Janeiro (RJ)**: DDD 21, 22, 24
+- **Minas Gerais (MG)**: DDD 31, 32, 33, 34, 35, 37, 38
+- **Outros estados**: identificar pelo DDD
+- **Internacional**: número começa com +1, +44, +351, etc. → detectar idioma e país
+
+Se for SP → campo state: "SP", encaminhar para pipeline SP
+Se for RJ → campo state: "RJ", encaminhar para pipeline RJ
+Se for internacional → idioma detectado (ex: "en", "es", "pt-PT")
+
+### Pipeline por Estado
+- Leads de SP → SEMPRE no pipeline "SP" (ou "Comercial SP" se disponível)
+- Leads de RJ → pipeline "RJ" ou pipeline padrão
+- Se só tiver 1 pipeline → usar o disponível mas marcar tag com estado
+
+### Regras de Follow-up (GHOSTING)
+- Lead sem resposta há mais de 3 dias → mover para etapa "Follow Up" + urgência alta
+- Lead sem resposta há mais de 7 dias → mover para "Follow Up" + tag "reativação" + tarefa: ligar
+- Última mensagem foi do atendente (sem resposta do cliente) → detectar ghosting
+
+### Score e Prioridade
+- Score 76-100 (muito quente) → urgência CRÍTICA, tarefa para hoje (due_days: 0)
+- Score 51-75 (quente) → urgência ALTA, tarefa para amanhã (due_days: 1)
+- Score 26-50 (morno) → urgência MÉDIA, tarefa para 3 dias (due_days: 3)
+- Score 0-25 (frio) → urgência BAIXA, tarefa para 7 dias (due_days: 7) ou null
+
+
 
 ## SUA MISSÃO COMPLETA
 Ao receber uma conversa de WhatsApp, você deve:
@@ -149,8 +199,13 @@ Responda SOMENTE com JSON válido, sem texto adicional antes ou depois:
   "temperature": "quente | morno | frio | desqualificado",
   "subject_specialist": "Assunto principal da conversa (ex: 'consulta cardiologia', 'exame laboratorial', 'plano saúde', 'cirurgia', etc.)",
   "traffic_source_type": "pago | organico | indicacao | desconhecido",
+  "client_state": "SP | RJ | MG | outro | internacional | desconhecido",
+  "client_language": "pt-BR | en | es | pt-PT | outro",
+  "specialist_indicated": "dr_leonardo | dra_lorena | tele | sp_presencial | rj_presencial | null",
+  "service_value": 0,
   "sentiment": "muito_positivo | positivo | neutro | negativo | muito_negativo",
   "client_intent": "comprar | informar | reclamar | desistir | negociar | aguardando | outro",
+  "is_ghosting": false,
 
   "move_to_status_id": null,
   "move_to_status_name": null,

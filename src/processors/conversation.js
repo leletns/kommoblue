@@ -196,7 +196,28 @@ async function applyDecision(leadId, decision, summary, contact) {
     }
   }
 
-  // ── 3. Atualizar campos customizados de qualificação no lead ──────────────
+  // ── 3. Pipeline routing por estado (SP → pipeline SP) ────────────────────
+  if (decision.client_state === 'SP' && !decision.move_to_status_id) {
+    // Tenta encontrar pipeline SP entre os disponíveis
+    try {
+      const pipelines = await kommo.getPipelinesWithStatuses();
+      const spPipeline = pipelines.find((p) =>
+        p.name.toLowerCase().includes('sp') || p.name.toLowerCase().includes('são paulo')
+      );
+      if (spPipeline && spPipeline.id !== summary.pipeline_id) {
+        const firstStatus = spPipeline.statuses.filter((s) => s.type === 0).sort((a, b) => a.sort - b.sort)[0];
+        if (firstStatus) {
+          await kommo.updateLead(leadId, { pipeline_id: spPipeline.id, status_id: firstStatus.id });
+          actions.push({ type: 'pipeline_move', from: summary.pipeline_name, to: `${spPipeline.name} — ${firstStatus.name}` });
+          logger.info(`[Processor] Lead ${leadId} movido para pipeline SP`);
+        }
+      }
+    } catch (err) {
+      logger.warn(`[Processor] Falha ao mover para pipeline SP: ${err.message}`);
+    }
+  }
+
+  // ── 4. Atualizar campos customizados de qualificação no lead ──────────────
   if (decision.qualification) {
     try {
       await updateQualificationFields(leadId, decision.qualification, decision.persona, summary, decision);
@@ -350,6 +371,34 @@ async function updateQualificationFields(leadId, qualification, persona, summary
     });
   }
 
+  // Estado/cidade do cliente (DDD)
+  if (decision.client_state) {
+    customFieldsValues.push({
+      field_code: 'CLIENT_STATE',
+      values: [{ value: decision.client_state }],
+    });
+  }
+
+  // Especialista indicado
+  if (decision.specialist_indicated) {
+    customFieldsValues.push({
+      field_code: 'SPECIALIST_INDICATED',
+      values: [{ value: decision.specialist_indicated }],
+    });
+  }
+
+  // Valor do serviço estimado
+  if (decision.service_value && decision.service_value > 0 && !summary.lead_value) {
+    customFieldsValues.push({
+      field_code: 'SERVICE_VALUE',
+      values: [{ value: String(decision.service_value) }],
+    });
+    // Também atualiza o valor do lead
+    try {
+      await kommo.updateLead(leadId, { price: decision.service_value });
+    } catch (_) {}
+  }
+
   if (customFieldsValues.length === 0) return;
 
   await kommo.updateLeadCustomFields(leadId, customFieldsValues);
@@ -357,40 +406,32 @@ async function updateQualificationFields(leadId, qualification, persona, summary
 }
 
 /**
- * Monta tags automáticas com base na qualificação, persona e origem.
+ * Monta tags — máximo 4, apenas as mais relevantes.
  */
 function buildTags(decision, summary) {
-  const tags = [...(decision.tags_to_add || [])];
+  const tags = [];
 
-  // Temperatura
-  if (decision.temperature) tags.push(`temp-${decision.temperature}`);
+  // 1. Temperatura (mais importante)
+  const temp = decision.temperature;
+  if (temp && temp !== 'desconhecido') tags.push(temp); // quente, morno, frio
 
-  // Score de qualificação
-  const scoreLabel = decision.qualification?.score_label;
-  if (scoreLabel) tags.push(`ia-${scoreLabel}`);
-
-  // Urgência
-  if (decision.urgency === 'alta') tags.push('urgente');
-  if (decision.urgency === 'critica') tags.push('critico');
-
-  // Intenção
-  if (decision.client_intent === 'comprar') tags.push('pronto-comprar');
-  if (decision.client_intent === 'desistir') tags.push('desistencia');
-
-  // Especialidade/assunto
-  if (decision.subject_specialist) {
-    const subjectTag = decision.subject_specialist
-      .toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 30);
-    if (subjectTag) tags.push(`assunto-${subjectTag}`);
+  // 2. Estado (SP, RJ, etc.)
+  if (decision.client_state && !['desconhecido', 'outro'].includes(decision.client_state)) {
+    tags.push(decision.client_state.toLowerCase()); // sp, rj, mg
   }
 
-  // Origem do tráfego (da IA ou dos UTMs)
+  // 3. Origem do tráfego
   const src = decision.traffic_source_type || classifyUtmSource(summary?.utms);
-  if (src === 'pago') tags.push('trafego-pago');
-  else if (src === 'organico') tags.push('trafego-organico');
+  if (src === 'pago') tags.push('pago');
   else if (src === 'indicacao') tags.push('indicacao');
+  else if (src === 'organico') tags.push('organico');
 
-  return [...new Set(tags)];
+  // 4. Ghosting ou urgência crítica
+  if (decision.is_ghosting) tags.push('ghosting');
+  else if (decision.urgency === 'critica') tags.push('urgente');
+  else if (decision.client_intent === 'comprar') tags.push('comprar');
+
+  return [...new Set(tags)].slice(0, 5); // máximo 5 tags
 }
 
 function classifyUtmSource(utms) {

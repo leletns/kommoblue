@@ -551,8 +551,8 @@ app.get('/scan', (req, res) => {
       <script>
         let interval;
         async function startScan(recentDays) {
-          const label = recentDays > 0 ? `últimos ${recentDays} dias` : 'todos os leads';
-          if(!confirm(`Iniciar varredura (${label})?`)) return;
+          const label = recentDays > 0 ? 'ultimos ' + recentDays + ' dias' : 'todos os leads';
+          if(!confirm('Iniciar varredura (' + label + ')?')) return;
           await fetch('/scan?recent_days='+recentDays, {method:'POST'});
           clearInterval(interval);
           interval = setInterval(updateStatus, 2000);
