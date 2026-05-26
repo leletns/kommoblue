@@ -18,6 +18,7 @@ const logger = require('./utils/logger');
 const { handleWebhook, getQueueStats } = require('./kommo/webhook-handler');
 const auth = require('./kommo/auth');
 const kommo = require('./kommo/client');
+const messageStore = require('./utils/message-store');
 
 const app = express();
 
@@ -514,7 +515,9 @@ app.post('/scan/stop', (req, res) => {
 
 app.get('/scan/status', (req, res) => {
   const { getScanStatus } = require('./processors/bulk-scan');
-  res.json(getScanStatus());
+  const status = getScanStatus();
+  status.message_store = messageStore.getStats();
+  res.json(status);
 });
 
 // Painel visual da varredura
@@ -576,7 +579,8 @@ app.get('/scan', (req, res) => {
             '<div class="stat" style="color:#059669"><b>'+d.won+'</b>Ganhos 🎉</div>'+
             '<div class="stat" style="color:#2563eb"><b>'+d.moved+'</b>Movidos</div>'+
             '<div class="stat" style="color:#dc2626"><b>'+d.errors+'</b>Erros</div>'+
-            (d.currentLead ? '<div class="stat"><b style="font-size:14px">'+d.currentLead.name+'</b>Processando</div>' : '');
+            '<div class="stat" style="color:#7c3aed"><b>'+d.skipped+'</b>Pulados</div>'+
+            (d.currentLead ? '<div class="stat"><b style="font-size:14px">'+(d.currentLead.name||d.currentLead.id)+'</b>Processando</div>' : '');
           const log = (d.log||[]).map(l => {
             const cls = l.type==='won'?'won':l.type==='moved'?'moved':l.type==='error'?'error':'skip';
             return '<div class="'+cls+'">['+l.time+'] '+l.message+'</div>';

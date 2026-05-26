@@ -18,6 +18,7 @@ const { processNewMessage, processNewLead } = require('../processors/conversatio
 const kommo = require('./client');
 const config = require('../config');
 const logger = require('../utils/logger');
+const messageStore = require('../utils/message-store');
 
 // Fila com concorrência 2 para não sobrecarregar APIs
 const queue = new PQueue({ concurrency: 2, interval: 1000, intervalCap: 3 });
@@ -50,6 +51,16 @@ async function handleWebhook(body, headers) {
     }
 
     processingDebounce.set(debounceKey, Date.now());
+
+    // Salva mensagem no store local — alimenta histórico para bulk scan
+    if (event.type === 'message' && event.message?.text) {
+      messageStore.addMessage(event.leadId, {
+        text: event.message.text,
+        direction: event.message.direction || 'inbound',
+        timestamp: event.message.created_at,
+        type: 'whatsapp',
+      });
+    }
 
     queue.add(async () => {
       try {

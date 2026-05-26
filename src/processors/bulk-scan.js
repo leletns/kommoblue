@@ -12,6 +12,7 @@
 const kommo = require('../kommo/client');
 const { analyzeConversation } = require('../ai/agent');
 const { resolveTaskDueDate } = require('../utils/date-parser');
+const messageStore = require('../utils/message-store');
 const config = require('../config');
 const logger = require('../utils/logger');
 
@@ -267,7 +268,11 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines, rec
     logger.warn(`[BulkScan] Lead ${leadId}: sem acesso a notas (403), continuando`);
   }
 
-  // Busca mensagens das talks — tenta 3 fontes em ordem
+  // Busca mensagens das talks — tenta 4 fontes em ordem
+
+  // 0) Message store local (salvo via webhooks) — SEMPRE verifica primeiro
+  const storedMessages = messageStore.getMessages(leadId);
+
   let talkMessages = [];
   const talkIdsSeen = new Set();
 
@@ -331,11 +336,16 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines, rec
     `${talkMessages.length} msgs talks`
   );
 
+  // storedMessages já vêm no formato normalizado do message-store
   const seen = new Set();
-  const messages = [...normalizedNotes, ...normalizedTalkMsgs]
+  const messages = [...normalizedNotes, ...normalizedTalkMsgs, ...storedMessages]
     .filter((m) => { if (seen.has(m.id)) return false; seen.add(m.id); return true; })
     .sort((a, b) => a.timestamp - b.timestamp)
     .slice(-config.agent.maxContextMessages);
+
+  if (storedMessages.length > 0) {
+    logger.info(`[BulkScan] Lead ${leadId}: +${storedMessages.length} msgs do message store local`);
+  }
 
   // Se não há mensagens, não pular — processar com dados do CRM
   // (nome, pipeline, tags, custom fields, DDD do telefone)
