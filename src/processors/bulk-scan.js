@@ -337,15 +337,16 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines, rec
     .sort((a, b) => a.timestamp - b.timestamp)
     .slice(-config.agent.maxContextMessages);
 
-  if (messages.length === 0) {
+  // Se não há mensagens, não pular — processar com dados do CRM
+  // (nome, pipeline, tags, custom fields, DDD do telefone)
+  const hasConversation = messages.length > 0;
+  if (!hasConversation) {
     const reason = notes.length === 0
-      ? 'sem notas na API (talks precisam de permissão chats no Kommo)'
+      ? 'sem notas na API (WhatsApp Lite — 403)'
       : filteredBotCount === notes.length
-      ? `${filteredBotCount} notas eram apenas nossas`
+      ? `${filteredBotCount} notas nossas filtradas`
       : 'notas sem texto';
-    addLog('skip', `Lead ${leadId} (${lead.name || 'sem nome'}): sem dados de conversa (${reason}) — pulando`);
-    scanState.skipped++;
-    return;
+    addLog('info', `Lead ${leadId} (${lead.name || 'sem nome'}): ${reason} — analisando só CRM`);
   }
 
   logger.info(`[BulkScan] Lead ${leadId}: ${messages.length} msgs (${normalizedNotes.length} notas + ${normalizedTalkMsgs.length} whatsapp)`);
@@ -381,6 +382,10 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines, rec
   const pipeline = pipelines.find((p) => p.id === lead.pipeline_id);
   const status = pipeline?.statuses?.find((s) => s.id === lead.status_id);
 
+  // Extrai telefone do contato (vem no embedded quando disponível)
+  const embeddedContact = lead._embedded?.contacts?.[0];
+  const contactPhone = extractContactPhone(embeddedContact);
+
   const summary = {
     lead_id: lead.id,
     lead_name: lead.name,
@@ -389,12 +394,13 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines, rec
     pipeline_name: pipeline?.name || `Pipeline ${lead.pipeline_id}`,
     current_status_id: lead.status_id,
     current_status_name: status?.name || `Status ${lead.status_id}`,
-    contact_id: lead._embedded?.contacts?.[0]?.id || null,
-    contact_name: lead._embedded?.contacts?.[0]?.name || null,
-    contact_phone: null,
+    contact_id: embeddedContact?.id || null,
+    contact_name: embeddedContact?.name || null,
+    contact_phone: contactPhone,
     contact_email: null,
     created_at: lead.created_at,
     total_messages: messages.length,
+    has_conversation: hasConversation,
     tags,
     utms: extractUtms(lead),
     custom_fields: customFields,
@@ -416,6 +422,23 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines, rec
   } else {
     addLog('analyzed', `Lead ${leadId} (${lead.name || 'sem nome'}): score ${decision.qualification?.score}/100 — etapa mantida`);
   }
+}
+
+/**
+ * Extrai telefone do contato embedded (quando disponível).
+ * Kommo retorna custom_fields nos contatos embedded com with=contacts.
+ */
+function extractContactPhone(contact) {
+  if (!contact) return null;
+  // Tenta campos customizados do contato
+  const fields = contact.custom_fields_values || [];
+  for (const field of fields) {
+    const code = (field.field_code || '').toUpperCase();
+    if (code === 'PHONE' || code === 'PHONES') {
+      return field.values?.[0]?.value || null;
+    }
+  }
+  return null;
 }
 
 function extractUtms(lead) {

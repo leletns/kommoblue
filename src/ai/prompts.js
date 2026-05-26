@@ -429,9 +429,13 @@ function buildUserPrompt({ summary, messages, newMessage }) {
     ? summary.contact_custom_fields.map((f) => `  • ${f.name}: ${f.value}`).join('\n')
     : '  (nenhum)';
 
+  const noHistoryWarning = summary.has_conversation === false
+    ? '\n⚠️ ATENÇÃO: Este lead NÃO tem histórico de conversa acessível via API (WhatsApp Lite bloqueado).\nUse SOMENTE os dados do CRM abaixo para qualificar: nome, pipeline, telefone (DDD), tags, campos customizados.\nDetecte o estado pelo DDD do telefone. Crie nota de qualificação básica e tarefa de follow-up.\n'
+    : '';
+
   return `## Dados do Lead no CRM
 - **ID**: ${summary.lead_id}
-- **Nome atual**: ${summary.lead_name || '(sem nome — extrair da conversa)'}
+- **Nome atual**: ${summary.lead_name || '(sem nome)'}
 - **Valor**: R$ ${(summary.lead_value || 0).toLocaleString('pt-BR')}
 - **Pipeline**: ${summary.pipeline_name || `ID ${summary.pipeline_id}`}
 - **Etapa atual**: ${summary.current_status_name || `ID ${summary.current_status_id}`}
@@ -439,8 +443,8 @@ function buildUserPrompt({ summary, messages, newMessage }) {
 - **Criado em**: ${summary.created_at ? new Date(summary.created_at * 1000).toLocaleString('pt-BR') : 'N/A'}
 
 ## Dados da Paciente (Contato)
-- **Nome**: ${summary.contact_name || '(desconhecido — extrair da conversa)'}
-- **Telefone**: ${summary.contact_phone || '(desconhecido — extrair da conversa)'}
+- **Nome**: ${summary.contact_name || '(desconhecido)'}
+- **Telefone**: ${summary.contact_phone || '(desconhecido)'}
 - **E-mail**: ${summary.contact_email || '(desconhecido)'}
 
 ## Campos customizados do Lead
@@ -451,7 +455,7 @@ ${contactCustomStr}
 
 ## Origem / UTMs da Campanha
 ${utmStr}
-
+${noHistoryWarning}
 ## Histórico completo da conversa (${summary.total_messages} mensagens)
 ATENÇÃO: O histórico pode incluir notas de integrações anteriores (ex: Growth Blue OS, bots).
 Essas notas são análises externas — use como contexto adicional, mas PRIORIZE mensagens reais da paciente.
