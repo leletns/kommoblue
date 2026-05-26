@@ -87,7 +87,7 @@ function stopScan() {
 /**
  * Inicia a varredura completa em background.
  */
-async function startBulkScan({ onlyActive = false, delayMs = 6000 } = {}) {
+async function startBulkScan({ onlyActive = false, delayMs = 6000, recentDays = 0 } = {}) {
   if (scanState.running) return { error: 'Varredura já em andamento' };
 
   Object.assign(scanState, {
@@ -107,7 +107,7 @@ async function startBulkScan({ onlyActive = false, delayMs = 6000 } = {}) {
 
   logger.info('[BulkScan] Iniciando varredura...');
 
-  runScan({ onlyActive, delayMs }).catch((err) => {
+  runScan({ onlyActive, delayMs, recentDays }).catch((err) => {
     logger.error('[BulkScan] Erro fatal:', err.message);
     addLog('error', `Erro fatal: ${err.message}`);
     scanState.running = false;
@@ -117,7 +117,7 @@ async function startBulkScan({ onlyActive = false, delayMs = 6000 } = {}) {
   return { started: true, message: 'Varredura iniciada em background' };
 }
 
-async function runScan({ onlyActive, delayMs }) {
+async function runScan({ onlyActive, delayMs, recentDays }) {
   try {
     // 1. Pipelines
     addLog('info', 'Carregando pipelines...');
@@ -139,23 +139,46 @@ async function runScan({ onlyActive, delayMs }) {
       if (lost) lostStatusMap[pipeline.id] = lost;
     }
 
-    // 2. Busca leads JÁ ENRIQUECIDOS na lista (evita GET /leads/{id} individual)
-    addLog('info', 'Buscando leads com dados enriquecidos...');
+    // 2. Busca talks recentes → mapeia leadId → [talkIds] com mensagens reais
+    //    (com token de longa duração pode ter acesso agora)
+    const recentTalksMap = {}; // leadId → [talkId, ...]
+    if (recentDays > 0) {
+      const fromTs = Math.floor(Date.now() / 1000) - recentDays * 86400;
+      addLog('info', `Buscando talks dos últimos ${recentDays} dias...`);
+      try {
+        const recentTalks = await kommo.fetchAllPages('/talks', {
+          'filter[updated_at][from]': fromTs,
+        });
+        for (const talk of recentTalks) {
+          const lid = String(talk.entity_id || talk.element_id || '');
+          if (lid) {
+            if (!recentTalksMap[lid]) recentTalksMap[lid] = [];
+            recentTalksMap[lid].push(talk.id);
+          }
+        }
+        addLog('info', `${recentTalks.length} talks recentes → ${Object.keys(recentTalksMap).length} leads com atividade WhatsApp`);
+      } catch (err) {
+        addLog('info', `Talks recentes: ${err.message} — seguindo sem filtro de talks`);
+      }
+    }
+
+    // 3. Busca leads JÁ ENRIQUECIDOS na lista (evita GET /leads/{id} individual)
+    addLog('info', recentDays > 0
+      ? `Buscando leads ativos dos últimos ${recentDays} dias...`
+      : 'Buscando leads com dados enriquecidos...'
+    );
     let allLeads;
     try {
-      // with=chats tenta trazer referência de conversa embutida no lead
-      const params = { with: 'contacts,tags,custom_fields_values,chats' };
-      if (onlyActive) params.filter = { statuses: [{ pipeline_id: 0, status_id: 0 }] };
+      const params = { with: 'contacts,tags,custom_fields_values' };
+      // Filtro por data de atualização (últimos N dias)
+      if (recentDays > 0) {
+        const fromTs = Math.floor(Date.now() / 1000) - recentDays * 86400;
+        params['filter[updated_at][from]'] = fromTs;
+      }
       allLeads = await kommo.fetchAllPages('/leads', params);
     } catch (err) {
-      try {
-        const params = { with: 'contacts,tags,custom_fields_values' };
-        if (onlyActive) params.filter = { statuses: [{ pipeline_id: 0, status_id: 0 }] };
-        allLeads = await kommo.fetchAllPages('/leads', params);
-      } catch (err2) {
-        addLog('error', `ERRO ao buscar leads: ${err2.message}`);
-        throw err2;
-      }
+      addLog('error', `ERRO ao buscar leads: ${err.message}`);
+      throw err;
     }
 
     scanState.total = allLeads.length;
@@ -173,7 +196,7 @@ async function runScan({ onlyActive, delayMs }) {
       let retries = 0;
       while (retries <= 2) {
         try {
-          await processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines);
+          await processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines, recentTalksMap);
           break;
         } catch (err) {
           if (err.response?.status === 429 && retries < 2) {
@@ -217,7 +240,7 @@ async function runScan({ onlyActive, delayMs }) {
  * Processa um lead usando os dados já carregados da lista enriquecida.
  * Não faz GET /leads/{id} — usa os dados do lead que já vieram da lista.
  */
-async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines) {
+async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines, recentTalksMap = {}) {
   const leadId = lead.id;
 
   // ── Pula leads GANHOS e PERDIDOS — só ativos ──────────────────────────────
@@ -243,38 +266,33 @@ async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines) {
     logger.warn(`[BulkScan] Lead ${leadId}: sem acesso a notas (403), continuando`);
   }
 
-  // Busca talks WhatsApp Lite — tenta via filter E via embedded do lead
+  // Busca mensagens das talks — tenta 3 fontes em ordem
   let talkMessages = [];
   const talkIdsSeen = new Set();
 
-  // 1) Chats embutidos no lead (quando fetched com with=chats)
-  const embeddedChats = lead._embedded?.chats || [];
-  for (const chat of embeddedChats) {
-    const chatId = chat.id || chat.talk_id;
-    if (chatId && !talkIdsSeen.has(chatId)) {
-      talkIdsSeen.add(chatId);
-      try {
-        const msgs = await kommo.getTalkMessages(chatId);
-        talkMessages.push(...msgs);
-      } catch (err) {
-        logger.warn(`[BulkScan] Lead ${leadId}: erro ao buscar msgs chat embutido ${chatId}: ${err.response?.status}`);
-      }
+  // 1) Talk IDs conhecidos do mapa de talks recentes
+  const knownTalkIds = recentTalksMap[String(leadId)] || [];
+  for (const talkId of knownTalkIds) {
+    if (!talkIdsSeen.has(talkId)) {
+      talkIdsSeen.add(talkId);
+      const msgs = await kommo.getTalkMessages(talkId);
+      talkMessages.push(...msgs);
     }
   }
 
-  // 2) Busca via filtro (complementa caso embedded não tenha todos)
-  try {
-    const talks = await kommo.getTalksByLead(leadId);
-    const newTalks = talks.filter((t) => !talkIdsSeen.has(t.id));
-    if (newTalks.length > 0) {
-      const allMsgs = await Promise.all(newTalks.map((t) => kommo.getTalkMessages(t.id)));
-      allMsgs.forEach((msgs, i) => {
-        talkIdsSeen.add(newTalks[i].id);
+  // 2) Busca via filter[entity_id] (complementa)
+  if (talkMessages.length === 0) {
+    try {
+      const talks = await kommo.getTalksByLead(leadId);
+      const newTalks = talks.filter((t) => !talkIdsSeen.has(t.id));
+      for (const talk of newTalks) {
+        talkIdsSeen.add(talk.id);
+        const msgs = await kommo.getTalkMessages(talk.id);
         talkMessages.push(...msgs);
-      });
+      }
+    } catch (err) {
+      logger.warn(`[BulkScan] Lead ${leadId}: erro ao buscar talks (${err.response?.status})`);
     }
-  } catch (err) {
-    logger.warn(`[BulkScan] Lead ${leadId}: erro ao buscar talks (${err.response?.status})`);
   }
 
   // Normaliza notas — remove APENAS as nossas próprias notas de varredura

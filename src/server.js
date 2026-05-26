@@ -501,8 +501,9 @@ app.post('/scan', async (req, res) => {
   const { startBulkScan } = require('./processors/bulk-scan');
   const onlyActive = req.query.only_active === 'true';
   const delayMs = parseInt(req.query.delay || '2000', 10);
+  const recentDays = parseInt(req.query.recent_days || '0', 10);
 
-  const result = await startBulkScan({ onlyActive, delayMs });
+  const result = await startBulkScan({ onlyActive, delayMs, recentDays });
   res.json(result);
 });
 
@@ -538,8 +539,9 @@ app.get('/scan', (req, res) => {
       <h1>🔍 Varredura em Massa — Kommo Blue</h1>
       <p>Processa TODOS os leads do Kommo: detecta comprovantes + CPF, qualifica e move pipelines automaticamente.</p>
 
-      <button class="btn" onclick="startScan(false)">▶ Varrer TODOS os leads</button>
-      <button class="btn btn-sec" onclick="startScan(true)">▶ Varrer apenas ativos</button>
+      <button class="btn" onclick="startScan(0)">▶ Varrer TODOS os leads</button>
+      <button class="btn btn-sec" onclick="startScan(14)" style="background:#0284c7">🕐 Últimas 2 semanas</button>
+      <button class="btn btn-sec" onclick="startScan(7)" style="background:#059669">🕐 Última semana</button>
       <button class="btn" style="background:#dc2626;margin-top:8px" onclick="stopScan()">⏹ Parar varredura</button>
 
       <div id="stats" style="margin-top:20px"></div>
@@ -548,9 +550,10 @@ app.get('/scan', (req, res) => {
 
       <script>
         let interval;
-        async function startScan(onlyActive) {
-          if(!confirm('Iniciar varredura? Isso pode levar vários minutos.')) return;
-          await fetch('/scan?only_active='+onlyActive, {method:'POST'});
+        async function startScan(recentDays) {
+          const label = recentDays > 0 ? `últimos ${recentDays} dias` : 'todos os leads';
+          if(!confirm(`Iniciar varredura (${label})?`)) return;
+          await fetch('/scan?recent_days='+recentDays, {method:'POST'});
           clearInterval(interval);
           interval = setInterval(updateStatus, 2000);
           updateStatus();
