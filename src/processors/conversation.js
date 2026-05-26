@@ -14,6 +14,7 @@
 const kommo = require('../kommo/client');
 const { loadConversationContext } = require('../kommo/conversation-loader');
 const { analyzeConversation } = require('../ai/agent');
+const { resolveTaskDueDate } = require('../utils/date-parser');
 const config = require('../config');
 const logger = require('../utils/logger');
 
@@ -257,12 +258,11 @@ async function applyDecision(leadId, decision, summary, contact) {
     actions.push({ type: 'auto_reply_queued', message: decision.reply_message });
   }
 
-  // ── 7. Criar tarefa se IA decidiu ────────────────────────────────────────
+  // ── 7. Criar tarefa com data inteligente ────────────────────────────────
   if (decision.task_to_create) {
     try {
       const taskTypeMap = { call: 1, meeting: 2, email: 3, followup: 1 };
-      const dueDays = decision.task_to_create.due_days || 1;
-      const dueTimestamp = Math.floor(Date.now() / 1000) + (dueDays * 86400);
+      const dueTimestamp = resolveTaskDueDate(decision.task_to_create);
 
       await kommo.createTask(leadId, {
         text: decision.task_to_create.text,
@@ -274,6 +274,18 @@ async function applyDecision(leadId, decision, summary, contact) {
       actions.push({ type: 'task_created', text: decision.task_to_create.text });
     } catch (err) {
       logger.error(`[Processor] Falha ao criar tarefa:`, err.message);
+    }
+  }
+
+  // ── 8. Salvar rascunho de mensagem como nota ──────────────────────────────
+  if (decision.draft_message) {
+    try {
+      const draftNote = `✍️ [RASCUNHO IA]\n\n${decision.draft_message}`;
+      await kommo.addLeadNote(leadId, { text: draftNote });
+      logger.info(`[Processor] Rascunho salvo para lead ${leadId}`);
+      actions.push({ type: 'draft_saved' });
+    } catch (err) {
+      logger.error(`[Processor] Falha ao salvar rascunho:`, err.message);
     }
   }
 

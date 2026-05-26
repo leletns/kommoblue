@@ -11,6 +11,7 @@
 
 const kommo = require('../kommo/client');
 const { analyzeConversation } = require('../ai/agent');
+const { resolveTaskDueDate } = require('../utils/date-parser');
 const config = require('../config');
 const logger = require('../utils/logger');
 
@@ -469,12 +470,11 @@ async function applyBulkDecision(leadId, decision, summary) {
     actions.push({ type: 'tags_added', tags });
   } catch (_) {}
 
-  // Task creation
+  // Task creation com data inteligente
   if (decision.task_to_create && decision.temperature !== 'frio' && decision.temperature !== 'desqualificado') {
     try {
       const taskTypeMap = { call: 1, meeting: 2, email: 3, followup: 1 };
-      const dueDays = decision.task_to_create.due_days || 1;
-      const dueTimestamp = Math.floor(Date.now() / 1000) + (dueDays * 86400);
+      const dueTimestamp = resolveTaskDueDate(decision.task_to_create);
 
       await kommo.createTask(leadId, {
         text: decision.task_to_create.text,
@@ -485,6 +485,15 @@ async function applyBulkDecision(leadId, decision, summary) {
     } catch (err) {
       logger.error(`[BulkScan] Falha ao criar tarefa lead ${leadId}:`, err.message);
     }
+  }
+
+  // Salva rascunho de mensagem como nota
+  if (decision.draft_message) {
+    try {
+      const draftNote = `✍️ [RASCUNHO IA]\n\n${decision.draft_message}`;
+      await kommo.addLeadNote(leadId, { text: draftNote });
+      actions.push({ type: 'draft_saved' });
+    } catch (_) {}
   }
 
   return actions;

@@ -169,6 +169,7 @@ function parseDecision(rawText, summary) {
       urgency: parsed.urgency || 'media',
       suggested_action: parsed.suggested_action || '',
       reply_message: parsed.reply_message || null,
+      draft_message: parsed.draft_message || null,
       task_to_create: parsed.task_to_create || null,
       appointment: parsed.appointment || null,
     };
