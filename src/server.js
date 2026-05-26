@@ -57,7 +57,14 @@ function verifyWebhookSignature(req) {
   return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
 }
 
+// Armazena últimos webhooks recebidos para debug
+const recentWebhooks = [];
+
 app.post('/webhook/kommo', async (req, res) => {
+  // Salva payload para debug (últimos 5)
+  recentWebhooks.unshift({ time: new Date().toLocaleTimeString('pt-BR'), body: req.body });
+  if (recentWebhooks.length > 5) recentWebhooks.pop();
+
   // Responde imediatamente para o Kommo não reenviar (timeout de 10s)
   res.status(200).json({ received: true });
 
@@ -197,6 +204,9 @@ app.get('/auth/kommo/callback', async (req, res) => {
     `);
   }
 });
+
+// Debug: últimos webhooks recebidos
+app.get('/webhook/recent', (req, res) => res.json(recentWebhooks));
 
 // ─── Health & Status ─────────────────────────────────────────────────────────
 

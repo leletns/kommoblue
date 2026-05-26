@@ -3,10 +3,12 @@
 /**
  * Orquestrador principal: webhook → contexto → IA → aplica decisão completa
  *
- * O agente agora faz TUDO automaticamente:
+ * O agente faz TUDO automaticamente:
  *   1. Carrega histórico completo + UTMs + campos customizados
  *   2. IA analisa, qualifica e extrai dados da conversa
- *   3. Atualiza: pipeline + nome do lead/contato + score + nota + tags
+ *   3. Atualiza: pipeline + nome do lead/contato + score + nota + tags + tarefa
+ *
+ * IMPORTANTE: Processa APENAS leads ativos (não GANHO nem PERDIDO).
  */
 
 const kommo = require('../kommo/client');
@@ -14,6 +16,26 @@ const { loadConversationContext } = require('../kommo/conversation-loader');
 const { analyzeConversation } = require('../ai/agent');
 const config = require('../config');
 const logger = require('../utils/logger');
+
+// Cache de status ganho/perdido para evitar fetch repetido
+let wonLostCache = null;
+let wonLostCacheTTL = 0;
+
+async function getWonLostStatusIds() {
+  if (wonLostCache && Date.now() < wonLostCacheTTL) return wonLostCache;
+  const pipelines = await kommo.getPipelinesWithStatuses();
+  const wonIds = new Set();
+  const lostIds = new Set();
+  for (const p of pipelines) {
+    for (const s of p.statuses) {
+      if (s.type === 142) wonIds.add(s.id);
+      if (s.type === 143) lostIds.add(s.id);
+    }
+  }
+  wonLostCache = { wonIds, lostIds };
+  wonLostCacheTTL = Date.now() + 5 * 60 * 1000; // cache 5 min
+  return wonLostCache;
+}
 
 /**
  * Processa uma nova mensagem recebida de um lead.
@@ -30,6 +52,22 @@ async function processNewMessage(event) {
   } catch (err) {
     logger.error(`[Processor] Falha ao carregar contexto do lead ${leadId}:`, err.message);
     return { success: false, error: err.message };
+  }
+
+  // ── GUARDA: só processa leads ATIVOS — ignora GANHO e PERDIDO ────────────
+  try {
+    const { wonIds, lostIds } = await getWonLostStatusIds();
+    const currentStatusId = context.summary.current_status_id;
+    if (wonIds.has(currentStatusId)) {
+      logger.info(`[Processor] Lead ${leadId} já GANHO — ignorando`);
+      return { success: false, reason: 'lead_ganho' };
+    }
+    if (lostIds.has(currentStatusId)) {
+      logger.info(`[Processor] Lead ${leadId} PERDIDO — ignorando`);
+      return { success: false, reason: 'lead_perdido' };
+    }
+  } catch (err) {
+    logger.warn(`[Processor] Não foi possível verificar status ganho/perdido: ${err.message}`);
   }
 
   const newMessage = message

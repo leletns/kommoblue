@@ -220,6 +220,20 @@ async function runScan({ onlyActive, delayMs }) {
 async function processLeadScan(lead, wonStatusMap, lostStatusMap, pipelines) {
   const leadId = lead.id;
 
+  // ── Pula leads GANHOS e PERDIDOS — só ativos ──────────────────────────────
+  const wonStatus = wonStatusMap[lead.pipeline_id];
+  const lostStatus = lostStatusMap[lead.pipeline_id];
+  if (lead.status_id === wonStatus?.id) {
+    scanState.skipped++;
+    addLog('skip', `Lead ${leadId} (${lead.name || 'sem nome'}): já GANHO — pulando`);
+    return;
+  }
+  if (lead.status_id === lostStatus?.id) {
+    scanState.skipped++;
+    addLog('skip', `Lead ${leadId} (${lead.name || 'sem nome'}): PERDIDO — pulando`);
+    return;
+  }
+
   // Busca notas (opcional — silencia 403)
   let notes = [];
   try {

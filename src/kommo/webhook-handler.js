@@ -67,36 +67,57 @@ async function handleWebhook(body, headers) {
 
 /**
  * Extrai eventos relevantes do payload do webhook Kommo.
- * Kommo pode enviar múltiplos eventos por webhook (ex: add_note + leads.update).
+ * Suporta todos os formatos do WhatsApp Lite.
  */
 function extractEvents(body) {
   const events = [];
 
-  // ── Formato: message.add (WhatsApp Lite / chat interno) ──────────────────
+  // ── WhatsApp Lite formato 1: message.add ──────────────────────────────────
+  // Disparado quando uma mensagem chega/é enviada via WhatsApp Lite
   if (body.message?.add) {
     for (const msg of body.message.add) {
       if (!msg.entity_id) continue;
+      const text = msg.text || msg.content || msg.message || '';
+      const isInbound = !msg.author_id || msg.author_id === 0 || msg.direction === 'in';
+      if (!isInbound) continue; // só processa mensagens DO CLIENTE
+
       events.push({
         type: 'message',
         leadId: parseInt(msg.entity_id, 10),
         message: {
           id: msg.id,
-          text: msg.text || msg.content || '',
-          created_at: msg.created_at,
-          author_id: msg.author_id || 0,
-          direction: msg.author_id === 0 ? 'inbound' : 'outbound',
+          text,
+          created_at: msg.created_at || Math.floor(Date.now() / 1000),
+          direction: 'inbound',
         },
       });
     }
   }
 
-  // ── Formato: add_note (notas internas, WhatsApp via nota) ────────────────
+  // ── WhatsApp Lite formato 2: incoming_chat_message ─────────────────────────
+  if (body.incoming_chat_message?.add) {
+    for (const msg of body.incoming_chat_message.add) {
+      const leadId = msg.entity_id || msg.lead_id;
+      if (!leadId) continue;
+      events.push({
+        type: 'message',
+        leadId: parseInt(leadId, 10),
+        message: {
+          id: msg.id,
+          text: msg.text || msg.content || '',
+          created_at: msg.created_at || Math.floor(Date.now() / 1000),
+          direction: 'inbound',
+        },
+      });
+    }
+  }
+
+  // ── Formato: add_note com note_type 103 (WhatsApp inbound via nota) ───────
   if (body.add_note) {
     for (const note of body.add_note) {
       if (!note.element_id) continue;
-      // Só processa notas de entrada do cliente (note_type 103 = WhatsApp, 25 = mensagem)
-      const clientNoteTypes = [103, 25, 1];
-      if (!clientNoteTypes.includes(note.note_type)) continue;
+      // note_type 103 = WhatsApp inbound; 25 = mensagem enviada (não processa)
+      if (note.note_type !== 103) continue;
 
       events.push({
         type: 'message',
@@ -111,7 +132,7 @@ function extractEvents(body) {
     }
   }
 
-  // ── Formato: leads.unsorted.add (nova conversa WhatsApp — lead novo) ─────
+  // ── leads.unsorted.add (nova conversa WhatsApp — lead ainda não aceito) ───
   if (body.leads?.unsorted?.add) {
     for (const unsorted of body.leads.unsorted.add) {
       events.push({
@@ -123,7 +144,7 @@ function extractEvents(body) {
     }
   }
 
-  // ── Formato: leads.add (novo lead criado) ────────────────────────────────
+  // ── leads.add (novo lead criado diretamente) ──────────────────────────────
   if (body.leads?.add) {
     for (const lead of body.leads.add) {
       events.push({
@@ -131,11 +152,6 @@ function extractEvents(body) {
         leadId: parseInt(lead.id, 10),
       });
     }
-  }
-
-  // ── Formato: contacts.add (novo contato — possivelmente com lead) ────────
-  if (body.contacts?.add) {
-    // Contatos novos geralmente têm lead associado — será tratado no leads.add
   }
 
   return events;
